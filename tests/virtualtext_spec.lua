@@ -45,9 +45,123 @@ local function extmark_details(app, bufnr)
     return mark[3]
 end
 
+local function float_text(app)
+    local bufnr = app.view.float_bufnr
+    if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+        return nil
+    end
+    return vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1]
+end
+
 return {
     {
-        name = 'line display shows only one line below the cursor',
+        name = 'below display overlays one cursor-aligned line without moving buffer lines',
+        run = function()
+            with_display_scenario(nil, {
+                complete = function(_, _, callbacks)
+                    callbacks.on_finish { 'foo(bar).baz' }
+                end,
+            }, function(bufnr, app)
+                local line_count = vim.api.nvim_buf_line_count(bufnr)
+                type_char(bufnr)
+                helpers.wait_until(function()
+                    return float_text(app) == 'foo(bar).baz'
+                end, 1000, 'the below-line suggestion must be shown')
+
+                helpers.expect_equal(vim.api.nvim_buf_line_count(bufnr), line_count)
+                local config = vim.api.nvim_win_get_config(app.view.float_winid)
+                local position = vim.api.nvim_win_get_position(app.view.float_winid)
+                local cursor = vim.api.nvim_win_get_cursor(0)
+                helpers.expect_equal(position, { cursor[1], cursor[2] })
+                helpers.expect_truthy(config.zindex < 100, 'the completion menu must have higher priority')
+                helpers.expect_equal(vim.api.nvim_get_option_value('wrap', { win = app.view.float_winid }), false)
+
+                local chunks = app.view:display_chunks 'foo(bar).baz'
+                helpers.expect_equal(chunks[1][2], 'HarmonizeVirtualTextOpacity100')
+                helpers.expect_equal(chunks[2][2], 'HarmonizeVirtualTextOpacity90')
+                helpers.expect_equal(chunks[3][2], 'HarmonizeVirtualTextOpacity80')
+            end)
+        end,
+    },
+    {
+        name = 'below display clips long completions at the window edge',
+        run = function()
+            local suggestion = string.rep('x', 400)
+            with_display_scenario(nil, {
+                complete = function(_, _, callbacks)
+                    callbacks.on_finish { suggestion }
+                end,
+            }, function(bufnr, app)
+                local line_count = vim.api.nvim_buf_line_count(bufnr)
+                type_char(bufnr)
+                helpers.wait_until(function()
+                    return float_text(app) == suggestion
+                end, 1000, 'the long suggestion must be shown')
+
+                local config = vim.api.nvim_win_get_config(app.view.float_winid)
+                helpers.expect_equal(vim.api.nvim_buf_line_count(bufnr), line_count)
+                helpers.expect_truthy(config.width < vim.fn.strdisplaywidth(suggestion), 'the preview must be clipped')
+                helpers.expect_equal(vim.api.nvim_get_option_value('wrap', { win = app.view.float_winid }), false)
+            end)
+        end,
+    },
+    {
+        name = 'chunk opacity uses the configured linear falloff and minimum',
+        run = function()
+            with_display_scenario({
+                chunk_fade = {
+                    opacity_step = 0.25,
+                    minimum_opacity = 0.5,
+                },
+            }, {
+                complete = function(_, _, callbacks)
+                    callbacks.on_finish { 'foo(bar)baz.qux' }
+                end,
+            }, function(bufnr, app)
+                type_char(bufnr)
+                helpers.wait_until(function()
+                    return float_text(app) == 'foo(bar)baz.qux'
+                end, 1000, 'the faded suggestion must be shown')
+
+                local chunks = app.view:display_chunks 'foo(bar)baz.qux'
+                helpers.expect_equal(vim.tbl_map(function(chunk)
+                    return chunk[2]
+                end, chunks), {
+                    'HarmonizeVirtualTextOpacity100',
+                    'HarmonizeVirtualTextOpacity75',
+                    'HarmonizeVirtualTextOpacity50',
+                    'HarmonizeVirtualTextOpacity50',
+                })
+                helpers.expect_equal(
+                    vim.api.nvim_get_hl(0, { name = 'HarmonizeVirtualTextOpacity75' }).blend,
+                    25
+                )
+            end)
+        end,
+    },
+    {
+        name = 'chunk opacity can be disabled',
+        run = function()
+            with_display_scenario({
+                chunk_fade = { enabled = false },
+            }, {
+                complete = function(_, _, callbacks)
+                    callbacks.on_finish { 'foo(bar).baz' }
+                end,
+            }, function(bufnr, app)
+                type_char(bufnr)
+                helpers.wait_until(function()
+                    return float_text(app) == 'foo(bar).baz'
+                end, 1000, 'the suggestion must be shown')
+
+                helpers.expect_equal(app.view:display_chunks 'foo(bar).baz', {
+                    { 'foo(bar).baz', 'HarmonizeVirtualText' },
+                })
+            end)
+        end,
+    },
+    {
+        name = 'line display overlays a newline-leading suggestion below the cursor',
         run = function()
             with_display_scenario({
                 display = 'line',
@@ -58,14 +172,13 @@ return {
                 end,
             }, function(bufnr, app)
                 type_char(bufnr)
+                local line_count = vim.api.nvim_buf_line_count(bufnr)
                 helpers.wait_until(function()
-                    return extmark_details(app, bufnr) ~= nil
+                    return float_text(app) == 'first line'
                 end, 1000, 'the suggestion must be shown')
 
-                local details = extmark_details(app, bufnr)
-                helpers.expect_equal(details.virt_text[1][1], '')
-                helpers.expect_equal(#details.virt_lines, 1)
-                helpers.expect_equal(details.virt_lines[1][1][1], 'first line')
+                helpers.expect_equal(vim.api.nvim_buf_line_count(bufnr), line_count)
+                helpers.expect_falsy(extmark_details(app, bufnr), 'below-line text must not use a virtual line')
             end)
         end,
     },
@@ -89,6 +202,7 @@ return {
                 -- 'foo(' is the whole first chunk: the identifier plus the
                 -- special characters that follow it.
                 helpers.expect_equal(details.virt_text[1][1], 'foo(')
+                helpers.expect_equal(details.virt_text_pos, 'overlay')
                 helpers.expect_falsy(details.virt_lines)
             end)
         end,
@@ -105,11 +219,8 @@ return {
             }, function(bufnr, app)
                 type_char(bufnr)
                 helpers.wait_until(function()
-                    return extmark_details(app, bufnr) ~= nil
+                    return float_text(app) == 'foobar'
                 end, 1000, 'the suggestion must be shown')
-
-                local details = extmark_details(app, bufnr)
-                helpers.expect_equal(details.virt_text[1][1], 'foobar')
             end)
         end,
     },
@@ -124,11 +235,8 @@ return {
             }, function(bufnr, app)
                 app.controller:trigger(bufnr)
                 helpers.wait_until(function()
-                    return extmark_details(app, bufnr) ~= nil
+                    return float_text(app) == 'manual completion'
                 end, 1000, 'the suggestion must be shown')
-
-                local details = extmark_details(app, bufnr)
-                helpers.expect_equal(details.virt_text[1][1], 'manual completion')
             end)
         end,
     },
@@ -269,11 +377,11 @@ return {
             }, function(bufnr, app)
                 app.controller:trigger(bufnr)
                 helpers.wait_until(function()
-                    return extmark_details(app, bufnr) ~= nil
+                    return app.view:is_visible()
                 end, 1000, 'the suggestion must be shown')
 
                 app:close()
-                helpers.expect_falsy(extmark_details(app, bufnr), 'close must remove the ghost text')
+                helpers.expect_falsy(app.view:is_visible(), 'close must remove the ghost text')
             end)
         end,
     },

@@ -2,19 +2,21 @@
 
 Streaming AI tab completion for Neovim, rewritten from
 [minuet-ai.nvim](https://github.com/milanglacier/minuet-ai.nvim). Point it at
-an endpoint and Tab completes in chunks, with the ghost text revealed line by
-line as the model generates tokens.
+an endpoint and Tab completes in chunks, with a one-line preview updated as
+the model generates tokens.
 
 ## Features
 
-- Virtual text frontend: suggestions render as ghost text inline and refresh
-  on every streaming token. No completion-menu integration to configure.
-- Chunk-wise acceptance: Tab accepts one chunk at a time (the current
+- Stable below-line preview: suggestions overlay the screen line below the
+  cursor without moving buffer lines, and refresh on every streaming token.
+  Long lines are clipped at the window edge instead of wrapping.
+- Chunk-wise acceptance: Tab accepts one cached chunk at a time (the current
   identifier plus the special characters that follow it), so long completions
-  arrive in reviewable steps.
-- Single-line display: the ghost shows the rest of the current line (or the
-  line below when the completion starts with a newline); the rest stays
-  cached for further acceptance.
+  arrive in reviewable steps without starting another request.
+- Confidence fade: each successive chunk is 10% less opaque by default, making
+  chunk boundaries visible while keeping the next chunk most prominent.
+- Completion-menu coexistence: LSP, nvim-cmp, and blink menus are drawn above
+  the Harmonize preview while both remain available.
 - Token streaming: the completion is a character stream — the model appends
   to the back while typing and Tab take from the front, so the first chunk
   appears quickly even on slow local models.
@@ -132,13 +134,19 @@ default (and a blank config does nothing at all).
 require('harmonize').setup {
     provider = 'llama_cpp',
 
-    -- What the ghost text shows: 'line' shows the rest of the current line
-    -- (or the line below when the completion starts with a newline);
-    -- 'chunk' shows exactly the next chunk Tab will accept.
-    display = 'line',
+    -- 'below' overlays the first completion line directly below the cursor;
+    -- 'line' overlays the current line; 'chunk' shows the next accepted chunk.
+    display = 'below',
+    chunk_fade = {
+        enabled = true,
+        opacity_step = 0.1,
+        minimum_opacity = 0.1,
+    },
     -- When requests fire: 'on_type' only after a character is typed,
-    -- 'on_insert' on any pause in insert mode.
+    -- 'on_insert' on any pause except after backspace.
     completion_trigger = 'on_type',
+    -- Keep Harmonize visible below another completion menu.
+    show_with_completion_menu = true,
     -- Filetypes where auto-completion fires; use { '*' } for all. Manual
     -- completion (keymap.trigger) works everywhere either way.
     auto_trigger_ft = { 'lua', 'python', 'rust' },
@@ -230,8 +238,9 @@ you have not taken yet, and it is redrawn on every token.
   arrow-key moves and scrolling only dismiss a stale suggestion, and entering
   insert mode alone does not trigger a request. Set
   `completion_trigger = 'on_insert'` to request on any pause instead.
-- `display = 'chunk'` shows only the next chunk in the ghost text — exactly
-  what Tab will complete — instead of the rest of the current line.
+- `display = 'below'` overlays the first completion line directly below the
+  cursor without adding a buffer line. `display = 'line'` overlays the current
+  line, and `display = 'chunk'` shows exactly what the next accept completes.
 - Typing the same characters keeps the remaining suggestion in sync; typing
   something different dismisses it and starts a fresh request.
 - When a chunk would cross a newline in the middle, it stops first — you never
@@ -272,10 +281,16 @@ default_config = {
         -- toggle auto-completion on and off
         toggle = nil,
     },
-    -- What the ghost text shows: 'line' shows the rest of the current line,
-    -- 'chunk' shows only the next chunk, exactly what the accept keymap will
-    -- complete.
-    display = 'line',
+    -- 'below' overlays the first completion line directly below the cursor;
+    -- 'line' overlays the current line; 'chunk' shows the next accepted chunk.
+    display = 'below',
+    -- Fade successive chunks linearly. 0.1 means ten percentage points per
+    -- chunk; the minimum keeps the rest readable.
+    chunk_fade = {
+        enabled = true,
+        opacity_step = 0.1,
+        minimum_opacity = 0.1,
+    },
     -- When requests fire: 'on_type' only after a character was typed,
     -- 'on_insert' on any pause in insert mode except after backspace.
     completion_trigger = 'on_type',

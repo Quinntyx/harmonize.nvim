@@ -3,11 +3,10 @@
 ## Features
 
 - Virtual Text: The new `display` option picks what the ghost text shows.
-  `'line'` shows only the remainder of the current line of the completion:
-  when the completion starts with a newline, the next line is shown below the
-  cursor instead of inline to its right, matching where accepting it actually
-  puts it, and the rest stays cached so it can still be accepted line by
-  line. `'chunk'` shows exactly the next chunk the `accept` keymap completes.
+  The default `'below'` mode overlays one cursor-aligned line below the current
+  screen line without moving buffer lines. `'line'` overlays the remainder of
+  the current line, and `'chunk'` shows exactly what the `accept` keymap
+  completes. Previews are clipped at the window edge instead of wrapping.
 - Virtual Text: `accept` is now the accept action, taking the completion one
   chunk at a time, where a chunk is the current identifier plus the special
   characters that follow it (for example `foo.bar(a, b).baz(c)` is accepted
@@ -20,6 +19,12 @@
   that `my_var_name`.
 - Virtual Text: A `toggle` keymap switches automatic completion on and off
   for the current buffer.
+- Successive chunks fade linearly by ten percentage points by default. The
+  step, minimum opacity, and feature itself are configurable through
+  `chunk_fade`.
+- Harmonize remains active while another completion menu is visible by
+  default. The menu draws above its preview, and
+  `show_with_completion_menu = false` restores suppression.
 - Providers other than `llama_cpp` and `openai_fim_compatible` are
   untested; using one shows a warning on setup unless
   `allow_unsupported_providers = true`.
@@ -42,8 +47,8 @@
 - The virtual text options moved to the top level of the config:
   `virtualtext.trigger_on_typing` became `completion_trigger` (`'on_type'` or
   `'on_insert'`), `virtualtext.display_singleline` became `display`
-  (`'line'` or `'chunk'`), and the remaining virtual text options lost their
-  prefix.
+  (`'below'`, `'line'`, or `'chunk'`), and the remaining virtual text options
+  lost their prefix.
 - The `quick_start` option became the `llama_cpp` provider plus the
   `auto_start` namespace. The provider talks to llama.cpp's native
   `/infill` endpoint, where the server constructs the FIM prompt with the
@@ -60,13 +65,13 @@
 - Accepting the whole completion and `accept_n_lines` are gone: `accept` now
   takes one chunk, and accepting a chunk counts as taking it from the stream,
   so the next chunk follows and repeated accepts never re-insert text.
-- The `show_on_completion_menu` option was removed: the ghost text is always
-  hidden while another completion menu is visible.
+- The `show_on_completion_menu` option was replaced by
+  `show_with_completion_menu`, which defaults to showing both completions.
 
 ## Defaults
 
 - Installing changes nothing by default: no keys are bound, no ghost text
-  is shown, and no provider is configured. Other defaults (single-line
+  is shown, and no provider is configured. Other defaults (below-line
   display, typing-only trigger, throttle and debounce) still apply. The
   README's install snippet turns everything on: the `llama_cpp` provider,
   Tab bound to accept chunks, ghost text in every filetype, and an
@@ -78,7 +83,7 @@
   longer `max_tokens` no longer means a longer wait for the first chunk.
   The completion is a character stream: the model keeps appending to the
   back up to the `max_tokens` cap while Tab or typing takes from the front,
-  and the remaining text is re-rendered on every token within the single-line
+  and the remaining text is re-rendered on every token within the one-line
   viewport rules.
 
 ## Removed

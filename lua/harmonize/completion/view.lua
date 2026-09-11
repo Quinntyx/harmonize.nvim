@@ -1,7 +1,8 @@
---- Ghost text rendering: owns the namespace and the single preview extmark.
---- Renders whatever suggestion it is handed and knows nothing about HTTP,
---- providers, or the completion state machine.
+--- Ghost text rendering: owns the namespace, inline extmark, and below-line
+--- floating preview. Renders suggestions without knowing about requests.
 local Session = require 'harmonize.completion.session'
+
+local api = vim.api
 
 ---@class harmonize.GhostTextView
 local View = {}
@@ -9,74 +10,209 @@ View.__index = View
 
 ---@param config table merged harmonize config
 function View.new(config)
-    local ns_id = vim.api.nvim_create_namespace 'harmonize.virtualtext'
+    local ns_id = api.nvim_create_namespace 'harmonize.virtualtext'
 
-    if vim.tbl_isempty(vim.api.nvim_get_hl(0, { name = 'HarmonizeVirtualText' })) then
-        vim.api.nvim_set_hl(0, 'HarmonizeVirtualText', { link = 'Comment' })
+    if vim.tbl_isempty(api.nvim_get_hl(0, { name = 'HarmonizeVirtualText' })) then
+        api.nvim_set_hl(0, 'HarmonizeVirtualText', { link = 'Comment' })
     end
+    api.nvim_set_hl(0, 'HarmonizeVirtualTextBackground', { bg = 'NONE', default = true })
 
     return setmetatable({
         config = config,
         ns_id = ns_id,
         extmark_id = 1,
         rendered_bufnr = nil,
+        float_bufnr = nil,
+        float_winid = nil,
     }, View)
 end
 
-function View:clear()
+function View:clear_extmark()
     local bufnr = self.rendered_bufnr
     self.rendered_bufnr = nil
-    if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
-        pcall(vim.api.nvim_buf_del_extmark, bufnr, self.ns_id, self.extmark_id)
+    if bufnr and api.nvim_buf_is_valid(bufnr) then
+        pcall(api.nvim_buf_del_extmark, bufnr, self.ns_id, self.extmark_id)
     end
+end
+
+function View:clear_float()
+    if self.float_winid and api.nvim_win_is_valid(self.float_winid) then
+        pcall(api.nvim_win_close, self.float_winid, true)
+    end
+    if self.float_bufnr and api.nvim_buf_is_valid(self.float_bufnr) then
+        pcall(api.nvim_buf_delete, self.float_bufnr, { force = true })
+    end
+    self.float_winid = nil
+    self.float_bufnr = nil
+end
+
+function View:clear()
+    self:clear_extmark()
+    self:clear_float()
 end
 
 --- Whether a ghost text is currently rendered in the current buffer.
 function View:is_visible()
-    return not not vim.api.nvim_buf_get_extmark_by_id(0, self.ns_id, self.extmark_id, { details = false })[1]
+    if self.float_winid and api.nvim_win_is_valid(self.float_winid) then
+        return true
+    end
+    return not not api.nvim_buf_get_extmark_by_id(0, self.ns_id, self.extmark_id, { details = false })[1]
+end
+
+---@param index integer one-based chunk index
+---@return string highlight_group
+function View:chunk_highlight(index)
+    local fade = self.config.chunk_fade
+    if not fade or not fade.enabled then
+        return 'HarmonizeVirtualText'
+    end
+
+    local step = math.min(1, math.max(0, tonumber(fade.opacity_step) or 0.1))
+    local minimum = math.min(1, math.max(0, tonumber(fade.minimum_opacity) or 0.1))
+    local opacity = math.max(minimum, 1 - (index - 1) * step)
+    local percent = math.floor(opacity * 100 + 0.5)
+    local group = 'HarmonizeVirtualTextOpacity' .. percent
+    local attributes = api.nvim_get_hl(0, { name = 'HarmonizeVirtualText', link = false })
+    attributes.blend = 100 - percent
+    api.nvim_set_hl(0, group, attributes)
+    return group
+end
+
+---@param text string single display line
+---@return table[] virt_text
+function View:display_chunks(text)
+    local fade = self.config.chunk_fade
+    if not fade or not fade.enabled then
+        return { { text, 'HarmonizeVirtualText' } }
+    end
+
+    local chunks = {}
+    local remaining = text
+    local index = 1
+    while remaining ~= '' do
+        local chunk, tail = Session.split_chunk(remaining)
+        if chunk == '' or tail == remaining then
+            chunk = remaining
+            tail = ''
+        end
+        chunks[#chunks + 1] = { chunk, self:chunk_highlight(index) }
+        remaining = tail
+        index = index + 1
+    end
+    return chunks
+end
+
+---@param chunks table[] virt_text chunks
+function View:render_below(chunks)
+    self:clear_extmark()
+
+    local text_parts = {}
+    for _, chunk in ipairs(chunks) do
+        text_parts[#text_parts + 1] = chunk[1]
+    end
+    local text = table.concat(text_parts)
+    if text == '' then
+        self:clear_float()
+        return
+    end
+
+    local width = math.max(1, math.min(vim.fn.strdisplaywidth(text), api.nvim_win_get_width(0) - vim.fn.wincol() + 1))
+    local bufnr = self.float_bufnr
+    if not bufnr or not api.nvim_buf_is_valid(bufnr) then
+        bufnr = api.nvim_create_buf(false, true)
+        self.float_bufnr = bufnr
+        api.nvim_set_option_value('bufhidden', 'wipe', { buf = bufnr })
+    end
+
+    api.nvim_set_option_value('modifiable', true, { buf = bufnr })
+    api.nvim_buf_set_lines(bufnr, 0, -1, false, { text })
+    api.nvim_buf_clear_namespace(bufnr, self.ns_id, 0, -1)
+    local col = 0
+    for _, chunk in ipairs(chunks) do
+        api.nvim_buf_add_highlight(bufnr, self.ns_id, chunk[2], 0, col, col + #chunk[1])
+        col = col + #chunk[1]
+    end
+    api.nvim_set_option_value('modifiable', false, { buf = bufnr })
+
+    local window_config = {
+        relative = 'cursor',
+        row = 1,
+        col = 0,
+        width = width,
+        height = 1,
+        anchor = 'NW',
+        style = 'minimal',
+        focusable = false,
+        noautocmd = true,
+        zindex = 50,
+    }
+    if self.float_winid and api.nvim_win_is_valid(self.float_winid) then
+        api.nvim_win_set_config(self.float_winid, window_config)
+    else
+        self.float_winid = api.nvim_open_win(bufnr, false, window_config)
+    end
+
+    api.nvim_set_option_value('wrap', false, { win = self.float_winid })
+    api.nvim_set_option_value('winblend', 1, { win = self.float_winid })
+    api.nvim_set_option_value(
+        'winhl',
+        'Normal:HarmonizeVirtualTextBackground,NormalNC:HarmonizeVirtualTextBackground',
+        { win = self.float_winid }
+    )
+end
+
+---@param chunks table[] virt_text chunks
+function View:render_inline(chunks)
+    self:clear_float()
+    local bufnr = api.nvim_get_current_buf()
+    if self.rendered_bufnr and self.rendered_bufnr ~= bufnr then
+        self:clear_extmark()
+    end
+    api.nvim_buf_set_extmark(bufnr, self.ns_id, vim.fn.line '.' - 1, vim.fn.col '.' - 1, {
+        id = self.extmark_id,
+        virt_text = chunks,
+        virt_text_pos = 'overlay',
+        virt_text_hide = true,
+        hl_mode = 'blend',
+    })
+    self.rendered_bufnr = bufnr
 end
 
 --- Redraw the ghost text for the session's current suggestion.
 ---@param session harmonize.CompletionSession
 function View:update(session)
     local suggestion = session.suggestion
-
-    self:clear()
-
-    if not suggestion or #suggestion == 0 then
+    if not suggestion or suggestion == '' then
+        self:clear()
         return
     end
 
-    local extmark = {
-        id = self.extmark_id,
-        virt_text_pos = 'inline',
-        hl_mode = 'replace',
-    }
-
+    local display_lines = vim.split(suggestion, '\n', { plain = true })
+    local text
+    local below = self.config.display == 'below'
     if self.config.display == 'chunk' then
-        -- Show exactly what the accept keymap completes next. A chunk
-        -- that leads with a newline is only that newline and renders empty.
-        extmark.virt_text = { { Session.split_chunk(suggestion):gsub('\n', ''), 'HarmonizeVirtualText' } }
+        text = Session.split_chunk(suggestion):gsub('\n', '')
+    elseif display_lines[1] ~= '' then
+        text = display_lines[1]
     else
-        local display_lines = vim.split(suggestion, '\n', { plain = true })
-        if display_lines[1] ~= '' then
-            extmark.virt_text = { { display_lines[1], 'HarmonizeVirtualText' } }
-        elseif display_lines[2] then
-            -- The current line is already complete; show the line below the
-            -- cursor instead.
-            extmark.virt_text = { { '', 'HarmonizeVirtualText' } }
-            extmark.virt_lines = { { { display_lines[2], 'HarmonizeVirtualText' } } }
-        else
-            return
-        end
+        text = display_lines[2]
+        below = true
     end
 
-    local bufnr = vim.api.nvim_get_current_buf()
-    vim.api.nvim_buf_set_extmark(bufnr, self.ns_id, vim.fn.line '.' - 1, vim.fn.col '.' - 1, extmark)
-    self.rendered_bufnr = bufnr
+    if not text or text == '' then
+        self:clear()
+        return
+    end
+
+    local chunks = self:display_chunks(text)
+    if below then
+        self:render_below(chunks)
+    else
+        self:render_inline(chunks)
+    end
 
     session.shown = true
-    session.last_pos = vim.api.nvim_win_get_cursor(0)
+    session.last_pos = api.nvim_win_get_cursor(0)
 end
 
 --- Whether a completion menu (the builtin popup menu, or a menu from

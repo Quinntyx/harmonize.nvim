@@ -11,6 +11,13 @@ return {
                 helpers.expect_falsy(config.keymap[key], 'keymap.' .. key .. ' must not be bound by default')
             end
             helpers.expect_equal(config.auto_trigger_ft, {})
+            helpers.expect_equal(config.display, 'below')
+            helpers.expect_equal(config.show_with_completion_menu, true)
+            helpers.expect_equal(config.chunk_fade, {
+                enabled = true,
+                opacity_step = 0.1,
+                minimum_opacity = 0.1,
+            })
         end,
     },
     {

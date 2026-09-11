@@ -190,12 +190,19 @@ local M = {
         -- toggle auto-completion on and off
         toggle = nil,
     },
-    -- What the ghost text shows. 'line' shows the rest of the current line,
-    -- or the line below the cursor when the completion starts with a
-    -- newline. 'chunk' shows only the next chunk, exactly what the
-    -- accept keymap will complete.
-    ---@type 'line' | 'chunk'
-    display = 'line',
+    -- What the ghost text shows. 'below' overlays the first completion line
+    -- directly below the cursor without moving buffer lines. 'line' overlays
+    -- the rest of the current line, and 'chunk' shows only what the accept
+    -- keymap completes next.
+    ---@type 'below' | 'line' | 'chunk'
+    display = 'below',
+    -- Fade each successive accepted chunk by a linear opacity step. The
+    -- minimum keeps long completions readable.
+    chunk_fade = {
+        enabled = true,
+        opacity_step = 0.1,
+        minimum_opacity = 0.1,
+    },
     -- When requests fire. 'on_type' requests only after a character was
     -- typed: arrow-key moves and scrolling dismiss the ghost text without
     -- requesting, and entering insert mode alone does not trigger either.

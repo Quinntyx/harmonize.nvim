@@ -9,6 +9,7 @@ local function with_trigger_scenario(overrides, scenario)
 
     local app = helpers.new_app(vim.tbl_deep_extend('force', {
         provider = 'test_trigger',
+        display = 'line',
         debounce = 0,
         throttle = 0,
     }, overrides or {}), {
