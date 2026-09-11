@@ -212,6 +212,7 @@ function TreeSitterSource:render_scopes(bufnr)
     state.chunks = chunks
 end
 
+--- Parse the buffer and re-render its chunks.
 function TreeSitterSource:parse(bufnr)
     local state = self:state(bufnr)
 
@@ -244,7 +245,6 @@ function TreeSitterSource:refresh(bufnr)
     end
 
     self:parse(bufnr)
-    self:render_scopes(bufnr)
 end
 
 ---@param bufnr integer

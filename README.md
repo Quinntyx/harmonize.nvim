@@ -229,7 +229,7 @@ you have not taken yet, and it is redrawn on every token.
 - By default, requests fire only after you actually type a character:
   arrow-key moves and scrolling only dismiss a stale suggestion, and entering
   insert mode alone does not trigger a request. Set
-  `completion_trigger = 'on_insert'` for the old behavior.
+  `completion_trigger = 'on_insert'` to request on any pause instead.
 - `display = 'chunk'` shows only the next chunk in the ghost text — exactly
   what Tab will complete — instead of the rest of the current line.
 - Typing the same characters keeps the remaining suggestion in sync; typing
@@ -239,8 +239,8 @@ you have not taken yet, and it is redrawn on every token.
 - `accept_line` takes the whole visible line.
 - A `toggle` keymap switches automatic completion on and off (same as
   `:Harmonize virtualtext toggle`).
-- `action.trigger` requests a completion on demand — useful in `'on_type'`
-  mode after navigating somewhere; bind it in `keymap` if you want a key.
+- The `trigger` keymap requests a completion on demand — useful in `'on_type'`
+  mode after navigating somewhere.
 
 ### Keymaps
 
@@ -272,8 +272,8 @@ default_config = {
         -- toggle auto-completion on and off
         toggle = nil,
     },
-    -- What the ghost text shows: 'line' shows the rest of the current line
-    -- shows only the next chunk, exactly what the accept keymap will
+    -- What the ghost text shows: 'line' shows the rest of the current line,
+    -- 'chunk' shows only the next chunk, exactly what the accept keymap will
     -- complete.
     display = 'line',
     -- When requests fire: 'on_type' only after a character was typed,
@@ -314,13 +314,15 @@ default_config = {
     -- Request timeout in seconds. With streaming, a timeout cut keeps the
     -- partial text generated so far.
     request_timeout = 3,
-    stream = true,
     curl_cmd = 'curl',
     curl_extra_args = {},
     -- Trim completion prefixes/suffixes that duplicate the surrounding text.
-    -- 0 for FIM models (they emit intentional whitespace); 15 / 2 for chat.
-    after_cursor_filter_length = function() end,
-    before_cursor_filter_length = function() end,
+    -- Left unset, each provider picks its own numbers (before / after): 0 / 0
+    -- for openai_fim_compatible, whose models emit intentional whitespace, and
+    -- 2 / 15 for llama_cpp and the chat providers. Either value may be a
+    -- function returning the number.
+    after_cursor_filter_length = nil,
+    before_cursor_filter_length = nil,
     proxy = nil,
     -- A list of predicates; auto-completion fires only while all return true.
     enable_predicates = {},
@@ -605,7 +607,8 @@ provider uses llama.cpp's native `/infill` endpoint.
 - `Harmonize change_provider <name>` — switch the active provider.
 - `Harmonize change_model [provider:model]` — with no argument, opens
   `vim.ui.select` over the models in `modelcard`; otherwise sets
-  `provider:model` directly.
+  `provider:model` directly. This cannot switch the model loaded by a
+  llama.cpp server; restart that server with the desired model instead.
 - `Harmonize change_preset <preset>` — merge a preset defined at setup into
   the current config.
 - `Harmonize virtualtext enable|disable|toggle` — control automatic ghost-text

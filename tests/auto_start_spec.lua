@@ -93,11 +93,11 @@ return {
                     '--ctx-size', '8192',
                 })
 
-                -- A local model file is passed with --model instead of -hf,
-                -- and a function returning a list works for extra_args too.
+                -- A relative local model file is passed with --model instead
+                -- of -hf, and extra_args may be a function returning a list.
                 cmd = install.server_cmd({
                     cmd = 'llama serve',
-                    model = '/models/qwen.gguf',
+                    model = 'models/qwen.gguf',
                     extra_args = function()
                         return { '-fa' }
                     end,
@@ -106,7 +106,7 @@ return {
                     'llama',
                     'serve',
                     '--model',
-                    '/models/qwen.gguf',
+                    'models/qwen.gguf',
                     '--host', '127.0.0.1',
                     '--port', '8012',
                     '-fa',

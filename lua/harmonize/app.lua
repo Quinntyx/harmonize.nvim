@@ -19,7 +19,9 @@ local untested_providers = {
 ---@param overrides? table test injection point: transport/backend/context/view/controller
 ---@return harmonize.App
 function App.new(user_config, overrides)
-    local defaults = require 'harmonize.config'
+    -- Work on a copy: vim.tbl_deep_extend shares nested tables with its
+    -- inputs, and the app writes to provider options when the model changes.
+    local defaults = vim.deepcopy(require 'harmonize.config')
     local config = vim.tbl_deep_extend('force', defaults, user_config or {})
 
     if config.enabled then
@@ -103,12 +105,16 @@ end
 
 --- Tear down every resource. Idempotent.
 function App:close()
-    self.controller:close()
-    self.bindings:close()
-    self.context:close()
-    self.backend:close()
-    self.deps.transport:close()
     self.started = false
+
+    -- One failing component must not stop the others from releasing resources.
+    local components = { self.controller, self.bindings, self.context, self.backend, self.deps.transport }
+    for _, component in ipairs(components) do
+        local ok, err = pcall(component.close, component)
+        if not ok then
+            self.deps.notify.notify('teardown failed: ' .. tostring(err), 'warn', vim.log.levels.WARN)
+        end
+    end
 end
 
 --- Yield the current snapshot for the buffer, as the controller consumes it.
@@ -179,6 +185,14 @@ function App:change_model(provider_model)
     if not config.provider_options[provider] then
         vim.notify(
             'The provider is not supported, please refer to harmonize.nvim document for more information.',
+            vim.log.levels.ERROR
+        )
+        return
+    end
+
+    if provider == 'llama_cpp' then
+        vim.notify(
+            'change_model cannot restart a llama.cpp server; restart it with the desired model instead.',
             vim.log.levels.ERROR
         )
         return

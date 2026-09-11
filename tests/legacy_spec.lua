@@ -87,7 +87,6 @@ local function with_mocked_job(run)
     end
 end
 
-
 local snapshot = {
     lines_before = 'before',
     lines_after = 'after',

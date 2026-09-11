@@ -144,7 +144,7 @@ return {
             }, function()
                 local binding = vim.fn.maparg('<M-b>', 'i', false, true)
                 helpers.expect_truthy(binding.callback or binding.rhs, 'the trigger key must be bound')
-                helpers.expect_equal(binding.desc, '[harmonize.virtualtext] manually request a completion')
+                helpers.expect_equal(binding.desc, '[harmonize] manually request a completion')
             end)
         end,
     },
@@ -190,7 +190,7 @@ return {
             }, function(_, app)
                 local binding = vim.fn.maparg('<M-t>', 'i', false, true)
                 helpers.expect_truthy(binding.callback or binding.rhs, 'the toggle key must be bound')
-                helpers.expect_equal(binding.desc, '[harmonize.virtualtext] toggle auto completion')
+                helpers.expect_equal(binding.desc, '[harmonize] toggle auto completion')
 
                 -- The toggle flips the buffer-local auto-trigger flag.
                 helpers.expect_equal(vim.b.harmonize_virtual_text_auto_trigger, true)

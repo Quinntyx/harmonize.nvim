@@ -14,9 +14,15 @@ local levels = {
 function M.set_level(level)
     if level == false then
         M.level = nil
-    else
-        M.level = level or 'warn'
+        return
     end
+
+    if level ~= nil and not levels[level] then
+        vim.notify(('harmonize: unknown notify level %q, using "warn"'):format(tostring(level)), vim.log.levels.WARN)
+        level = nil
+    end
+
+    M.level = level or 'warn'
 end
 
 ---@param msg string

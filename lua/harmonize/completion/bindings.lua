@@ -71,7 +71,7 @@ function Bindings:setup()
             callback = function()
                 controller[method](controller)
             end,
-            desc = '[harmonize.virtualtext] ' .. event,
+            desc = '[harmonize] ' .. event,
         }))
     end
 
@@ -79,7 +79,7 @@ function Bindings:setup()
         callback = function(info)
             controller:drop_session(info.buf)
         end,
-        desc = '[harmonize.virtualtext] buf unload',
+        desc = '[harmonize] buf unload',
     }))
 
     if #self.config.auto_trigger_ft > 0 then
@@ -96,11 +96,11 @@ function Bindings:setup()
 
     local keymap = self.config.keymap
     local actions = {
-        accept = { 'accept', '[harmonize.virtualtext] accept suggestion (chunk)' },
-        accept_line = { 'accept_line', '[harmonize.virtualtext] accept suggestion (line)' },
-        dismiss = { 'dismiss', '[harmonize.virtualtext] dismiss suggestion' },
-        trigger = { 'trigger', '[harmonize.virtualtext] manually request a completion' },
-        toggle = { 'toggle_auto_trigger', '[harmonize.virtualtext] toggle auto completion' },
+        accept = { 'accept', '[harmonize] accept suggestion (chunk)' },
+        accept_line = { 'accept_line', '[harmonize] accept suggestion (line)' },
+        dismiss = { 'dismiss', '[harmonize] dismiss suggestion' },
+        trigger = { 'trigger', '[harmonize] manually request a completion' },
+        toggle = { 'toggle_auto_trigger', '[harmonize] toggle auto completion' },
     }
 
     for key, spec in pairs(actions) do

@@ -135,7 +135,7 @@ end
 ---@param ctx harmonize.CompletionSession
 ---@return string?
 function Controller:current_suggestion(ctx)
-    if not vim.fn.mode():match '^[iR]' or not ctx.suggestion then
+    if not vim.fn.mode():match '^[iR]' or not ctx.suggestion or #ctx.suggestion == 0 then
         return nil
     end
     return ctx.suggestion

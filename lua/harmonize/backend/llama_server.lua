@@ -16,13 +16,9 @@ function ManagedServer.new(opts, deps)
     }, ManagedServer)
 end
 
-local function has_curl()
-    return vim.fn.executable 'curl' == 1
-end
-
 --- Is a server already answering at host:port?
 function ManagedServer:healthy()
-    if not has_curl() then
+    if not install.has_curl() then
         -- Without a probe we assume the server is down and try to start it;
         -- the failure message then tells the user why that could not work.
         return false
@@ -61,7 +57,7 @@ function ManagedServer:spawn(cmd)
         vim.api.nvim_create_autocmd('VimLeavePre', {
             group = vim.api.nvim_create_augroup('HarmonizeAutoStartServer', { clear = true }),
             callback = function()
-                pcall(handle.kill, handle, 'sigterm')
+                self:stop()
             end,
             desc = 'stop the auto-started llama.cpp server',
         })

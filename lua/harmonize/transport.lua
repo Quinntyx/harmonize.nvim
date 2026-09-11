@@ -156,8 +156,8 @@ function Transport:post(end_point, headers, body, handlers)
                 return
             end
             cancelled = true
-            local terminated = pcall(job.kill, job, 'sigterm')
-            if terminated then
+            local kill_ok = pcall(job.kill, job, 'sigterm')
+            if kill_ok then
                 for i, active_job in ipairs(self.active) do
                     if active_job == job then
                         table.remove(self.active, i)

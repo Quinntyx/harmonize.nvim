@@ -120,7 +120,6 @@ local default_fim_suffix = function(_, context_after_cursor, _)
     return context_after_cursor
 end
 
-
 ---@class harmonize.ChatInputExtraInfo
 ---@field is_incomplete_before boolean
 ---@field is_incomplete_after boolean
@@ -200,7 +199,7 @@ local M = {
     -- When requests fire. 'on_type' requests only after a character was
     -- typed: arrow-key moves and scrolling dismiss the ghost text without
     -- requesting, and entering insert mode alone does not trigger either.
-    -- 'on_insert' is the old behavior: any pause in insert mode triggers.
+    -- 'on_insert' triggers after any pause in insert mode.
     ---@type 'on_type' | 'on_insert'
     completion_trigger = 'on_type',
     -- No provider is configured by default: a blank config does nothing
@@ -462,7 +461,6 @@ M.provider_options = {
         get_text_fn = {},
     },
 }
-
 
 M.presets = {}
 

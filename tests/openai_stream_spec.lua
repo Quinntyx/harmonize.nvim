@@ -67,7 +67,6 @@ local function with_mocked_job(run)
     end
 end
 
-
 local context = {
     lines_before = '',
     lines_after = '',

@@ -13,12 +13,13 @@ Context.__index = Context
 local source_order = { 'treesitter', 'jumplist', 'recent_edits' }
 
 ---@param config table merged harmonize config
----@param _deps table shared dependencies (kept for construction symmetry)
-function Context.new(config, _deps)
+---@param deps table? shared dependencies
+function Context.new(config, deps)
     local self = setmetatable({
         options = config.context_sources or {},
         cursor = CursorCapture.new(config),
         sources = {},
+        notify = deps and deps.notify,
         augroup = nil,
     }, Context)
 
@@ -186,8 +187,19 @@ function Context:snapshot_extra(bufnr, covered)
 
     for _, name in ipairs(source_order) do
         local source = self.sources[name]
-        local ok, chunks = pcall(source.snapshot, source, bufnr)
-        source_chunks[name] = ok and chunks or {}
+        local ok, result = pcall(source.snapshot, source, bufnr)
+        if ok then
+            source_chunks[name] = result
+        else
+            source_chunks[name] = {}
+            if self.notify then
+                self.notify.notify(
+                    string.format('context source %s failed: %s', name, tostring(result)),
+                    'debug',
+                    vim.log.levels.DEBUG
+                )
+            end
+        end
     end
 
     return self:compose(source_chunks, covered or { start = 0, end_exclusive = nil }, bufnr)

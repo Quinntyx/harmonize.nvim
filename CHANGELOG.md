@@ -98,6 +98,23 @@
 - The lualine statusline component and the unused deprecation-notice module
   are gone.
 
+## Fixes
+
+- Changing the model with `change_model` no longer changes the configuration
+  defaults for the rest of the session: the next `setup()` still starts from
+  the documented defaults.
+- The ghost-text keymap descriptions now read `[harmonize]` instead of
+  `[harmonize.virtualtext]`.
+- An unknown `notify` level warns and falls back to `'warn'` instead of
+  failing the next time a message is logged.
+- Relative `.gguf` paths such as `models/qwen.gguf` are passed to llama.cpp as
+  local files instead of being mistaken for Hugging Face repository IDs.
+- `change_model` now reports that it cannot restart a llama.cpp server instead
+  of claiming that its model changed.
+- A context source that fails is logged at the debug level instead of failing
+  silently, and a failing teardown step no longer stops the other resources
+  from being released.
+
 # Version 0.10.0 (2026-07-31)
 
 ## Features

@@ -13,7 +13,8 @@ M.fallback_release = 'b4600'
 
 M.data_dir = data_dir
 
-local function has_curl()
+--- Whether curl is available for downloads and health checks.
+function M.has_curl()
     return vim.fn.executable 'curl' == 1
 end
 
@@ -46,7 +47,7 @@ end
 --- Newest tag whose Ubuntu x64 asset still exists; `nil` when the API cannot
 --- be reached (the caller falls back to the pinned tag).
 function M.latest_release_tag()
-    if not has_curl() then
+    if not M.has_curl() then
         return nil
     end
 
@@ -103,7 +104,7 @@ function M.download_binary(version, then_fn)
         return
     end
 
-    if not has_curl() then
+    if not M.has_curl() then
         vim.notify(
             'llama.cpp not found and `curl` is missing; install it or put `llama` on PATH',
             vim.log.levels.ERROR
@@ -159,10 +160,12 @@ function M.server_cmd(opts, host, port)
         end
     end
 
-    if opts.model:match '^[^/]+/[^/]+$' then
+    local expanded_model = vim.fn.expand(opts.model)
+    local is_local_model = opts.model:lower():match '%.gguf$' or vim.fn.filereadable(expanded_model) == 1
+    if opts.model:match '^[^/]+/[^/]+$' and not is_local_model then
         vim.list_extend(words, { '-hf', opts.model })
     else
-        vim.list_extend(words, { '--model', opts.model })
+        vim.list_extend(words, { '--model', expanded_model })
     end
 
     vim.list_extend(words, { '--host', host, '--port', tostring(port) })
