@@ -182,8 +182,32 @@ return {
                     return chunk[1]
                 end, details.virt_lines[1]))
                 helpers.expect_equal(rendered, 'first line')
+                helpers.expect_equal(details.virt_text[1][1], '↵')
+                helpers.expect_equal(details.virt_text_pos, 'overlay')
                 helpers.expect_equal(vim.api.nvim_buf_line_count(bufnr), line_count)
                 helpers.expect_falsy(float_text(app), 'newline-leading text must not use the cursor-relative float')
+            end)
+        end,
+    },
+    {
+        name = 'chunk display marks a newline as the next accepted character',
+        run = function()
+            with_display_scenario({
+                display = 'chunk',
+            }, {
+                complete = function(_, _, callbacks)
+                    callbacks.on_finish { '\nnext line' }
+                end,
+            }, function(bufnr, app)
+                type_char(bufnr)
+                helpers.wait_until(function()
+                    local details = extmark_details(app, bufnr)
+                    return details and details.virt_text
+                end, 1000, 'the newline indicator must be shown')
+
+                local details = extmark_details(app, bufnr)
+                helpers.expect_equal(details.virt_text[1][1], '↵')
+                helpers.expect_falsy(details.virt_lines, 'chunk display must show only the next accepted chunk')
             end)
         end,
     },

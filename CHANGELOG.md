@@ -6,9 +6,10 @@
   The default `'below'` mode overlays same-line continuations beneath the cursor
   without moving buffer lines. Newline-leading continuations use an in-place
   virtual line so they appear where accepting them will put them and shift
-  following screen text down. `'line'` overlays the current line, and `'chunk'`
-  shows exactly what the `accept` keymap completes. Previews are clipped at the
-  window edge instead of wrapping.
+  following screen text down. A `↵` at the cursor indicates that the next
+  accepted chunk starts with a newline. `'line'` overlays the current line, and
+  `'chunk'` shows exactly what the `accept` keymap completes. Below-line floats
+  remain fixed at the cursor when clipped instead of shifting left.
 - Virtual Text: `accept` is now the accept action, taking the completion one
   chunk at a time, where a chunk is the current identifier plus the special
   characters that follow it (for example `foo.bar(a, b).baz(c)` is accepted

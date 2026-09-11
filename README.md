@@ -9,8 +9,9 @@ the model generates tokens.
 
 - Stable below-line preview: same-line continuations overlay the screen line
   below the cursor without moving buffer lines. When the completion starts a
-  new line, it is shown in that actual position and following screen text moves
-  down. Long lines are clipped at the window edge instead of wrapping.
+  new line, a `↵` at the cursor marks what Tab will insert, the next line is
+  shown in its actual position, and following screen text moves down. Long
+  lines are clipped at the window edge instead of wrapping.
 - Chunk-wise acceptance: Tab accepts one cached chunk at a time (the current
   identifier plus the special characters that follow it), so long completions
   arrive in reviewable steps without starting another request.
@@ -244,7 +245,8 @@ you have not taken yet, and it is redrawn on every token.
 - `display = 'below'` overlays same-line completions beneath the cursor without
   adding a buffer line. A newline-leading completion uses an in-place virtual
   line so it appears where accepting it will put it and shifts following screen
-  text down. `display = 'line'` overlays the current line, and `display =
+  text down. A `↵` at the cursor indicates that the next chunk starts with a
+  newline. `display = 'line'` overlays the current line, and `display =
   'chunk'` shows exactly what the next accept completes.
 - Typing the same characters keeps the remaining suggestion in sync; typing
   something different dismisses it and starts a fresh request.

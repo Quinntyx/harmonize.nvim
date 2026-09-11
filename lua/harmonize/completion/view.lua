@@ -3,6 +3,7 @@
 local Session = require 'harmonize.completion.session'
 
 local api = vim.api
+local newline_indicator = '↵'
 
 ---@param foreground integer
 ---@param background integer
@@ -163,6 +164,7 @@ function View:render_below(chunks)
         anchor = 'NW',
         style = 'minimal',
         focusable = false,
+        fixed = true,
         noautocmd = true,
         zindex = 50,
     }
@@ -207,6 +209,9 @@ function View:render_next_line(chunks)
     end
     api.nvim_buf_set_extmark(bufnr, self.ns_id, vim.fn.line '.' - 1, vim.fn.col '.' - 1, {
         id = self.extmark_id,
+        virt_text = { { newline_indicator, self:chunk_highlight(1) } },
+        virt_text_pos = 'overlay',
+        virt_text_hide = true,
         virt_lines = { chunks },
         hl_mode = 'replace',
     })
@@ -226,7 +231,7 @@ function View:update(session)
     local text
     local next_line = false
     if self.config.display == 'chunk' then
-        text = Session.split_chunk(suggestion):gsub('\n', '')
+        text = Session.split_chunk(suggestion):gsub('\n', newline_indicator)
     elseif display_lines[1] ~= '' then
         text = display_lines[1]
     else
@@ -234,12 +239,12 @@ function View:update(session)
         next_line = true
     end
 
-    if not text or text == '' then
+    if not text then
         self:clear()
         return
     end
 
-    local chunks = self:display_chunks(text)
+    local chunks = text == '' and { { ' ', self:chunk_highlight(2) } } or self:display_chunks(text)
     if next_line then
         self:render_next_line(chunks)
     elseif self.config.display == 'below' then
