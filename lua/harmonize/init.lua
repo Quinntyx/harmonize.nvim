@@ -20,6 +20,17 @@ function M.setup(config)
     require('harmonize.command').set_app(app)
 end
 
+---@return boolean
+function M.is_visible()
+    return app ~= nil and app.controller:is_visible()
+end
+
+function M.accept()
+    if app then
+        app.controller:accept()
+    end
+end
+
 function M.change_model(provider_model)
     if not app then
         vim.notify 'Harmonize config is not set up yet, please call the setup function firstly.'

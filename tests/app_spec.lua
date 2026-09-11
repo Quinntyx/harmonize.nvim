@@ -90,6 +90,48 @@ return {
         end,
     },
     {
+        name = 'the public facade exposes visibility and chunk acceptance',
+        run = function()
+            helpers.reset_harmonize_modules()
+            local accepted = false
+            package.loaded['harmonize.app'] = {
+                new = function()
+                    return {
+                        config = {},
+                        presets = {},
+                        start = function() end,
+                        close = function() end,
+                        controller = {
+                            is_visible = function()
+                                return true
+                            end,
+                            accept = function()
+                                accepted = true
+                            end,
+                        },
+                    }
+                end,
+            }
+            package.loaded['harmonize.command'] = {
+                register = function() end,
+                set_app = function() end,
+            }
+
+            local ok, err = xpcall(function()
+                local harmonize = require 'harmonize'
+                harmonize.setup {}
+                helpers.expect_equal(harmonize.is_visible(), true)
+                harmonize.accept()
+                helpers.expect_equal(accepted, true)
+            end, debug.traceback)
+
+            helpers.reset_harmonize_modules()
+            if not ok then
+                error(err, 0)
+            end
+        end,
+    },
+    {
         name = 'changing a llama_cpp model reports that the server must restart',
         run = function()
             local App = require 'harmonize.app'

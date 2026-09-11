@@ -634,6 +634,10 @@ provider uses llama.cpp's native `/infill` endpoint.
 
 ## API
 
+`require('harmonize').is_visible()` reports whether a preview is shown, and
+`require('harmonize').accept()` accepts its next chunk. These are useful when a
+completion plugin owns Tab and should get the first chance to handle it.
+
 ### Actions
 
 Bind the editor actions through the `keymap` table at setup:
