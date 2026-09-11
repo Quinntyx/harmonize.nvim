@@ -190,10 +190,9 @@ local M = {
         -- toggle auto-completion on and off
         toggle = nil,
     },
-    -- What the ghost text shows. 'below' overlays the first completion line
-    -- directly below the cursor without moving buffer lines. 'line' overlays
-    -- the rest of the current line, and 'chunk' shows only what the accept
-    -- keymap completes next.
+    -- What the ghost text shows. 'below' overlays same-line completions beneath
+    -- the cursor; newline-leading text uses its actual next-line position.
+    -- 'line' overlays the current line, and 'chunk' shows what accept takes.
     ---@type 'below' | 'line' | 'chunk'
     display = 'below',
     -- Fade each successive accepted chunk by a linear opacity step. The

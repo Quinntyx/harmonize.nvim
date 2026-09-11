@@ -4,6 +4,21 @@ local Session = require 'harmonize.completion.session'
 
 local api = vim.api
 
+---@param foreground integer
+---@param background integer
+---@param opacity number
+---@return integer
+local function fade_color(foreground, background, opacity)
+    local color = 0
+    for shift = 0, 16, 8 do
+        local fg = math.floor(foreground / 2 ^ shift) % 256
+        local bg = math.floor(background / 2 ^ shift) % 256
+        local channel = math.floor(bg + (fg - bg) * opacity + 0.5)
+        color = color + channel * 2 ^ shift
+    end
+    return color
+end
+
 ---@class harmonize.GhostTextView
 local View = {}
 View.__index = View
@@ -73,7 +88,12 @@ function View:chunk_highlight(index)
     local percent = math.floor(opacity * 100 + 0.5)
     local group = 'HarmonizeVirtualTextOpacity' .. percent
     local attributes = api.nvim_get_hl(0, { name = 'HarmonizeVirtualText', link = false })
-    attributes.blend = 100 - percent
+    local normal = api.nvim_get_hl(0, { name = 'Normal', link = false })
+    local background = normal.bg or (vim.o.background == 'light' and 0xffffff or 0x000000)
+    if attributes.fg then
+        attributes.fg = fade_color(attributes.fg, background, opacity)
+    end
+    attributes.blend = nil
     api.nvim_set_hl(0, group, attributes)
     return group
 end
@@ -153,7 +173,7 @@ function View:render_below(chunks)
     end
 
     api.nvim_set_option_value('wrap', false, { win = self.float_winid })
-    api.nvim_set_option_value('winblend', 1, { win = self.float_winid })
+    api.nvim_set_option_value('winblend', 0, { win = self.float_winid })
     api.nvim_set_option_value(
         'winhl',
         'Normal:HarmonizeVirtualTextBackground,NormalNC:HarmonizeVirtualTextBackground',
@@ -173,7 +193,22 @@ function View:render_inline(chunks)
         virt_text = chunks,
         virt_text_pos = 'overlay',
         virt_text_hide = true,
-        hl_mode = 'blend',
+        hl_mode = 'replace',
+    })
+    self.rendered_bufnr = bufnr
+end
+
+---@param chunks table[] virt_text chunks
+function View:render_next_line(chunks)
+    self:clear_float()
+    local bufnr = api.nvim_get_current_buf()
+    if self.rendered_bufnr and self.rendered_bufnr ~= bufnr then
+        self:clear_extmark()
+    end
+    api.nvim_buf_set_extmark(bufnr, self.ns_id, vim.fn.line '.' - 1, vim.fn.col '.' - 1, {
+        id = self.extmark_id,
+        virt_lines = { chunks },
+        hl_mode = 'replace',
     })
     self.rendered_bufnr = bufnr
 end
@@ -189,14 +224,14 @@ function View:update(session)
 
     local display_lines = vim.split(suggestion, '\n', { plain = true })
     local text
-    local below = self.config.display == 'below'
+    local next_line = false
     if self.config.display == 'chunk' then
         text = Session.split_chunk(suggestion):gsub('\n', '')
     elseif display_lines[1] ~= '' then
         text = display_lines[1]
     else
         text = display_lines[2]
-        below = true
+        next_line = true
     end
 
     if not text or text == '' then
@@ -205,7 +240,9 @@ function View:update(session)
     end
 
     local chunks = self:display_chunks(text)
-    if below then
+    if next_line then
+        self:render_next_line(chunks)
+    elseif self.config.display == 'below' then
         self:render_below(chunks)
     else
         self:render_inline(chunks)

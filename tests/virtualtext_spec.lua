@@ -132,10 +132,11 @@ return {
                     'HarmonizeVirtualTextOpacity50',
                     'HarmonizeVirtualTextOpacity50',
                 })
-                helpers.expect_equal(
-                    vim.api.nvim_get_hl(0, { name = 'HarmonizeVirtualTextOpacity75' }).blend,
-                    25
-                )
+                local full = vim.api.nvim_get_hl(0, { name = 'HarmonizeVirtualTextOpacity100' })
+                local faded = vim.api.nvim_get_hl(0, { name = 'HarmonizeVirtualTextOpacity75' })
+                local minimum = vim.api.nvim_get_hl(0, { name = 'HarmonizeVirtualTextOpacity50' })
+                helpers.expect_truthy(full.fg ~= faded.fg, 'the second chunk must use a visibly different color')
+                helpers.expect_truthy(faded.fg ~= minimum.fg, 'successive opacity levels must remain distinct')
             end)
         end,
     },
@@ -161,11 +162,9 @@ return {
         end,
     },
     {
-        name = 'line display overlays a newline-leading suggestion below the cursor',
+        name = 'below display puts newline-leading text in its actual next-line position',
         run = function()
-            with_display_scenario({
-                display = 'line',
-            }, {
+            with_display_scenario(nil, {
                 complete = function(_, _, callbacks)
                     callbacks.on_update '\nfirst line\nsecond line\nthird line'
                     callbacks.on_finish { '\nfirst line\nsecond line\nthird line' }
@@ -174,11 +173,17 @@ return {
                 type_char(bufnr)
                 local line_count = vim.api.nvim_buf_line_count(bufnr)
                 helpers.wait_until(function()
-                    return float_text(app) == 'first line'
-                end, 1000, 'the suggestion must be shown')
+                    local details = extmark_details(app, bufnr)
+                    return details and details.virt_lines
+                end, 1000, 'the in-place next-line suggestion must be shown')
 
+                local details = extmark_details(app, bufnr)
+                local rendered = table.concat(vim.tbl_map(function(chunk)
+                    return chunk[1]
+                end, details.virt_lines[1]))
+                helpers.expect_equal(rendered, 'first line')
                 helpers.expect_equal(vim.api.nvim_buf_line_count(bufnr), line_count)
-                helpers.expect_falsy(extmark_details(app, bufnr), 'below-line text must not use a virtual line')
+                helpers.expect_falsy(float_text(app), 'newline-leading text must not use the cursor-relative float')
             end)
         end,
     },

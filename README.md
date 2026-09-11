@@ -7,14 +7,16 @@ the model generates tokens.
 
 ## Features
 
-- Stable below-line preview: suggestions overlay the screen line below the
-  cursor without moving buffer lines, and refresh on every streaming token.
-  Long lines are clipped at the window edge instead of wrapping.
+- Stable below-line preview: same-line continuations overlay the screen line
+  below the cursor without moving buffer lines. When the completion starts a
+  new line, it is shown in that actual position and following screen text moves
+  down. Long lines are clipped at the window edge instead of wrapping.
 - Chunk-wise acceptance: Tab accepts one cached chunk at a time (the current
   identifier plus the special characters that follow it), so long completions
   arrive in reviewable steps without starting another request.
-- Confidence fade: each successive chunk is 10% less opaque by default, making
-  chunk boundaries visible while keeping the next chunk most prominent.
+- Confidence fade: each successive chunk is 10% less prominent by default.
+  Explicit foreground colors keep the difference visible even with a
+  transparent editor background.
 - Completion-menu coexistence: LSP, nvim-cmp, and blink menus are drawn above
   the Harmonize preview while both remain available.
 - Token streaming: the completion is a character stream — the model appends
@@ -134,7 +136,8 @@ default (and a blank config does nothing at all).
 require('harmonize').setup {
     provider = 'llama_cpp',
 
-    -- 'below' overlays the first completion line directly below the cursor;
+    -- 'below' overlays same-line text beneath the cursor; newline-leading text
+    -- uses its actual next-line position and shifts following screen text.
     -- 'line' overlays the current line; 'chunk' shows the next accepted chunk.
     display = 'below',
     chunk_fade = {
@@ -238,9 +241,11 @@ you have not taken yet, and it is redrawn on every token.
   arrow-key moves and scrolling only dismiss a stale suggestion, and entering
   insert mode alone does not trigger a request. Set
   `completion_trigger = 'on_insert'` to request on any pause instead.
-- `display = 'below'` overlays the first completion line directly below the
-  cursor without adding a buffer line. `display = 'line'` overlays the current
-  line, and `display = 'chunk'` shows exactly what the next accept completes.
+- `display = 'below'` overlays same-line completions beneath the cursor without
+  adding a buffer line. A newline-leading completion uses an in-place virtual
+  line so it appears where accepting it will put it and shifts following screen
+  text down. `display = 'line'` overlays the current line, and `display =
+  'chunk'` shows exactly what the next accept completes.
 - Typing the same characters keeps the remaining suggestion in sync; typing
   something different dismisses it and starts a fresh request.
 - When a chunk would cross a newline in the middle, it stops first — you never
@@ -281,7 +286,8 @@ default_config = {
         -- toggle auto-completion on and off
         toggle = nil,
     },
-    -- 'below' overlays the first completion line directly below the cursor;
+    -- 'below' overlays same-line text beneath the cursor; newline-leading text
+    -- uses its actual next-line position and shifts following screen text.
     -- 'line' overlays the current line; 'chunk' shows the next accepted chunk.
     display = 'below',
     -- Fade successive chunks linearly. 0.1 means ten percentage points per

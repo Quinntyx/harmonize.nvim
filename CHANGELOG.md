@@ -3,10 +3,12 @@
 ## Features
 
 - Virtual Text: The new `display` option picks what the ghost text shows.
-  The default `'below'` mode overlays one cursor-aligned line below the current
-  screen line without moving buffer lines. `'line'` overlays the remainder of
-  the current line, and `'chunk'` shows exactly what the `accept` keymap
-  completes. Previews are clipped at the window edge instead of wrapping.
+  The default `'below'` mode overlays same-line continuations beneath the cursor
+  without moving buffer lines. Newline-leading continuations use an in-place
+  virtual line so they appear where accepting them will put them and shift
+  following screen text down. `'line'` overlays the current line, and `'chunk'`
+  shows exactly what the `accept` keymap completes. Previews are clipped at the
+  window edge instead of wrapping.
 - Virtual Text: `accept` is now the accept action, taking the completion one
   chunk at a time, where a chunk is the current identifier plus the special
   characters that follow it (for example `foo.bar(a, b).baz(c)` is accepted
@@ -19,7 +21,8 @@
   that `my_var_name`.
 - Virtual Text: A `toggle` keymap switches automatic completion on and off
   for the current buffer.
-- Successive chunks fade linearly by ten percentage points by default. The
+- Successive chunks fade linearly by ten percentage points by default. Explicit
+  foreground colors make the fade visible with transparent backgrounds. The
   step, minimum opacity, and feature itself are configurable through
   `chunk_fade`.
 - Harmonize remains active while another completion menu is visible by
