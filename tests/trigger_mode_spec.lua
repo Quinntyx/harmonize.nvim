@@ -57,7 +57,8 @@ local function type_char(bufnr, c)
 end
 
 local function arrow_move(bufnr)
-    vim.api.nvim_win_set_cursor(0, { 1, vim.fn.col '.' + 1 })
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    vim.api.nvim_win_set_cursor(0, { cursor[1], math.max(0, cursor[2] - 1) })
     vim.api.nvim_exec_autocmds('CursorMovedI', { buffer = bufnr })
 end
 

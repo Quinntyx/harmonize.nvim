@@ -292,7 +292,8 @@ end
 --- closed first: while it is open the insertion would be reverted when Vim
 --- restores the buffer state on pum close.
 ---@param lines string[]
-local function insert_lines(lines)
+---@param on_inserted? fun()
+local function insert_lines(lines, on_inserted)
     local cursor = api.nvim_win_get_cursor(0)
     local line, col = cursor[1] - 1, cursor[2]
 
@@ -308,6 +309,9 @@ local function insert_lines(lines)
             new_col = new_col + col
         end
         api.nvim_win_set_cursor(0, { line + #lines, new_col })
+        if on_inserted then
+            on_inserted()
+        end
     end)
 end
 
@@ -323,9 +327,9 @@ function Controller:accept()
     local lines = vim.split(chunk, '\n', { plain = true })
 
     self.view:clear()
-    insert_lines(lines)
-
-    vim.schedule(function()
+    insert_lines(lines, function()
+        -- Accepting changes the buffer without invalidating the cached tail.
+        self.last_seen_changedtick = vim.b.changedtick
         if remaining then
             self:refresh_preview(ctx)
         end
@@ -341,9 +345,8 @@ function Controller:accept_lines(n_lines)
 
     local lines, remaining = ctx:take_lines(n_lines)
     self.view:clear()
-    insert_lines(lines)
-
-    vim.schedule(function()
+    insert_lines(lines, function()
+        self.last_seen_changedtick = vim.b.changedtick
         if #remaining > 0 then
             self:refresh_preview(ctx)
         end
@@ -428,7 +431,8 @@ function Controller:on_cursor_moved_i()
             -- Pure navigation (arrow keys, scrolling): never fire a request;
             -- drop a stale suggestion left at the previous position.
             local ctx = self:session()
-            if ctx.shown then
+            local cursor = api.nvim_win_get_cursor(0)
+            if ctx.shown and (not ctx.last_pos or cursor[1] ~= ctx.last_pos[1] or cursor[2] ~= ctx.last_pos[2]) then
                 self:cleanup(ctx)
             end
         end
@@ -436,6 +440,10 @@ function Controller:on_cursor_moved_i()
     end
 
     local ctx = self:session()
+    local cursor = api.nvim_win_get_cursor(0)
+    if ctx.shown and ctx.last_pos and cursor[1] == ctx.last_pos[1] and cursor[2] == ctx.last_pos[2] then
+        return
+    end
     if self:update_suggestion_on_typing(ctx) then
         return
     end

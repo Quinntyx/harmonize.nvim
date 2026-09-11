@@ -179,6 +179,46 @@ return {
         end,
     },
     {
+        name = 'repeated accepts reuse the cached completion',
+        run = function()
+            local requests = 0
+            with_display_scenario({
+                display = 'chunk',
+            }, {
+                complete = function(_, _, callbacks)
+                    requests = requests + 1
+                    callbacks.on_update 'foo(bar)baz'
+                    callbacks.on_finish { 'foo(bar)baz' }
+                end,
+            }, function(bufnr, app)
+                type_char(bufnr)
+                helpers.wait_until(function()
+                    return extmark_details(app, bufnr) ~= nil
+                end, 1000, 'the suggestion must be shown')
+
+                app.controller:accept()
+                vim.wait(100)
+                vim.api.nvim_exec_autocmds('TextChangedI', { buffer = bufnr })
+                vim.api.nvim_exec_autocmds('CursorMovedI', { buffer = bufnr })
+                vim.wait(20)
+
+                helpers.expect_equal(requests, 1, 'the first accept must not start another request')
+                helpers.expect_equal(app.controller:session(bufnr).suggestion, 'bar)baz')
+                helpers.expect_equal(extmark_details(app, bufnr).virt_text[1][1], 'bar)')
+
+                app.controller:accept()
+                vim.wait(100)
+                vim.api.nvim_exec_autocmds('TextChangedI', { buffer = bufnr })
+                vim.api.nvim_exec_autocmds('CursorMovedI', { buffer = bufnr })
+                vim.wait(20)
+
+                helpers.expect_equal(requests, 1, 'the second accept must still use the cached completion')
+                helpers.expect_equal(app.controller:session(bufnr).suggestion, 'baz')
+                helpers.expect_equal(extmark_details(app, bufnr).virt_text[1][1], 'baz')
+            end)
+        end,
+    },
+    {
         name = 'keymap.toggle binds the auto-completion toggle action',
         run = function()
             with_display_scenario({
