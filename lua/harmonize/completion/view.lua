@@ -82,7 +82,7 @@ function View:chunk_highlight(index)
         return 'HarmonizeVirtualText'
     end
 
-    local step = math.min(1, math.max(0, tonumber(fade.opacity_step) or 0.1))
+    local step = math.min(1, math.max(0, tonumber(fade.opacity_step) or 0.25))
     local minimum = math.min(1, math.max(0, tonumber(fade.minimum_opacity) or 0.1))
     local opacity = math.max(minimum, 1 - (index - 1) * step)
     local percent = math.floor(opacity * 100 + 0.5)

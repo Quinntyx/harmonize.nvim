@@ -21,7 +21,7 @@
   that `my_var_name`.
 - Virtual Text: A `toggle` keymap switches automatic completion on and off
   for the current buffer.
-- Successive chunks fade linearly by ten percentage points by default. Explicit
+- Successive chunks fade linearly by 25 percentage points by default. Explicit
   foreground colors make the fade visible with transparent backgrounds. The
   step, minimum opacity, and feature itself are configurable through
   `chunk_fade`.

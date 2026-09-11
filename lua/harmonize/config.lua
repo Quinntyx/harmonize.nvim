@@ -199,7 +199,7 @@ local M = {
     -- minimum keeps long completions readable.
     chunk_fade = {
         enabled = true,
-        opacity_step = 0.1,
+        opacity_step = 0.25,
         minimum_opacity = 0.1,
     },
     -- When requests fire. 'on_type' requests only after a character was

@@ -15,7 +15,7 @@ return {
             helpers.expect_equal(config.show_with_completion_menu, true)
             helpers.expect_equal(config.chunk_fade, {
                 enabled = true,
-                opacity_step = 0.1,
+                opacity_step = 0.25,
                 minimum_opacity = 0.1,
             })
         end,

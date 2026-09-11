@@ -14,7 +14,7 @@ the model generates tokens.
 - Chunk-wise acceptance: Tab accepts one cached chunk at a time (the current
   identifier plus the special characters that follow it), so long completions
   arrive in reviewable steps without starting another request.
-- Confidence fade: each successive chunk is 10% less prominent by default.
+- Confidence fade: each successive chunk is 25% less prominent by default.
   Explicit foreground colors keep the difference visible even with a
   transparent editor background.
 - Completion-menu coexistence: LSP, nvim-cmp, and blink menus are drawn above
@@ -142,7 +142,7 @@ require('harmonize').setup {
     display = 'below',
     chunk_fade = {
         enabled = true,
-        opacity_step = 0.1,
+        opacity_step = 0.25,
         minimum_opacity = 0.1,
     },
     -- When requests fire: 'on_type' only after a character is typed,
@@ -290,11 +290,11 @@ default_config = {
     -- uses its actual next-line position and shifts following screen text.
     -- 'line' overlays the current line; 'chunk' shows the next accepted chunk.
     display = 'below',
-    -- Fade successive chunks linearly. 0.1 means ten percentage points per
+    -- Fade successive chunks linearly. 0.25 means 25 percentage points per
     -- chunk; the minimum keeps the rest readable.
     chunk_fade = {
         enabled = true,
-        opacity_step = 0.1,
+        opacity_step = 0.25,
         minimum_opacity = 0.1,
     },
     -- When requests fire: 'on_type' only after a character was typed,

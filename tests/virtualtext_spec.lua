@@ -78,8 +78,8 @@ return {
 
                 local chunks = app.view:display_chunks 'foo(bar).baz'
                 helpers.expect_equal(chunks[1][2], 'HarmonizeVirtualTextOpacity100')
-                helpers.expect_equal(chunks[2][2], 'HarmonizeVirtualTextOpacity90')
-                helpers.expect_equal(chunks[3][2], 'HarmonizeVirtualTextOpacity80')
+                helpers.expect_equal(chunks[2][2], 'HarmonizeVirtualTextOpacity75')
+                helpers.expect_equal(chunks[3][2], 'HarmonizeVirtualTextOpacity50')
             end)
         end,
     },
