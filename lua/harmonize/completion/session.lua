@@ -10,6 +10,8 @@ function Session.new()
         suggestion = nil,
         shown = nil,
         last_pos = nil,
+        event_pos = nil,
+        event_tick = nil,
         stream = nil, -- { raw, consumed, done }
     }, Session)
 end

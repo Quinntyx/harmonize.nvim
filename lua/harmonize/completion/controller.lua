@@ -272,7 +272,7 @@ function Controller:schedule()
         end
         if
             self.is_on_throttle
-            or self.view:menu_visible()
+            or (not config.show_with_completion_menu and self.view:menu_visible())
             or (not run_hooks_until_failure(config.enable_predicates))
         then
             return
@@ -330,6 +330,8 @@ function Controller:accept()
     insert_lines(lines, function()
         -- Accepting changes the buffer without invalidating the cached tail.
         self.last_seen_changedtick = vim.b.changedtick
+        ctx.event_pos = api.nvim_win_get_cursor(0)
+        ctx.event_tick = vim.b.changedtick
         if remaining then
             self:refresh_preview(ctx)
         end
@@ -347,6 +349,8 @@ function Controller:accept_lines(n_lines)
     self.view:clear()
     insert_lines(lines, function()
         self.last_seen_changedtick = vim.b.changedtick
+        ctx.event_pos = api.nvim_win_get_cursor(0)
+        ctx.event_tick = vim.b.changedtick
         if #remaining > 0 then
             self:refresh_preview(ctx)
         end
@@ -369,6 +373,9 @@ end
 --- is never mistaken for a freshly typed character.
 function Controller:on_insert_enter()
     self.last_seen_changedtick = vim.b.changedtick
+    local ctx = self:session()
+    ctx.event_pos = api.nvim_win_get_cursor(0)
+    ctx.event_tick = vim.b.changedtick
     if should_auto_trigger() and self.config.completion_trigger == 'on_insert' then
         self:schedule()
     end
@@ -426,12 +433,13 @@ function Controller:handle_insert_change()
 end
 
 function Controller:on_cursor_moved_i()
+    local ctx = self:session()
+    local cursor = api.nvim_win_get_cursor(0)
+
     if self.config.completion_trigger == 'on_type' then
         if not self:handle_insert_change() then
             -- Pure navigation (arrow keys, scrolling): never fire a request;
             -- drop a stale suggestion left at the previous position.
-            local ctx = self:session()
-            local cursor = api.nvim_win_get_cursor(0)
             if ctx.shown and (not ctx.last_pos or cursor[1] ~= ctx.last_pos[1] or cursor[2] ~= ctx.last_pos[2]) then
                 self:cleanup(ctx)
             end
@@ -439,8 +447,20 @@ function Controller:on_cursor_moved_i()
         return
     end
 
-    local ctx = self:session()
-    local cursor = api.nvim_win_get_cursor(0)
+    local tick = vim.b.changedtick
+    local backspaced = ctx.event_pos
+        and ctx.event_tick ~= tick
+        and (cursor[1] < ctx.event_pos[1] or (cursor[1] == ctx.event_pos[1] and cursor[2] < ctx.event_pos[2]))
+    ctx.event_pos = cursor
+    ctx.event_tick = tick
+    if backspaced then
+        self:stop_timer()
+        if ctx.shown then
+            self:cleanup(ctx)
+        end
+        return
+    end
+
     if ctx.shown and ctx.last_pos and cursor[1] == ctx.last_pos[1] and cursor[2] == ctx.last_pos[2] then
         return
     end

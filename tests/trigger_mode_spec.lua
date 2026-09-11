@@ -62,6 +62,14 @@ local function arrow_move(bufnr)
     vim.api.nvim_exec_autocmds('CursorMovedI', { buffer = bufnr })
 end
 
+local function backspace(bufnr)
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    vim.api.nvim_buf_set_text(bufnr, cursor[1] - 1, cursor[2] - 1, cursor[1] - 1, cursor[2], {})
+    vim.api.nvim_win_set_cursor(0, { cursor[1], cursor[2] - 1 })
+    vim.api.nvim_exec_autocmds('TextChangedI', { buffer = bufnr })
+    vim.api.nvim_exec_autocmds('CursorMovedI', { buffer = bufnr })
+end
+
 local function extmark_shown(app, bufnr)
     return vim.api.nvim_buf_get_extmark_by_id(bufnr, app.view.ns_id, 1, { details = true })[3] ~= nil
 end
@@ -133,6 +141,35 @@ return {
         end,
     },
     {
+        name = 'completion continues while another completion menu is visible',
+        run = function()
+            with_trigger_scenario(nil, function(bufnr, get_calls, app)
+                app.view.menu_visible = function()
+                    return true
+                end
+                type_char(bufnr, 'x')
+                helpers.wait_until(function()
+                    return get_calls() == 1
+                end, 1000, 'the visible menu must not suppress harmonize')
+            end)
+        end,
+    },
+    {
+        name = 'completion-menu coexistence can be disabled',
+        run = function()
+            with_trigger_scenario({
+                show_with_completion_menu = false,
+            }, function(bufnr, get_calls, app)
+                app.view.menu_visible = function()
+                    return true
+                end
+                type_char(bufnr, 'x')
+                vim.wait(100)
+                helpers.expect_equal(get_calls(), 0, 'the opt-out must suppress harmonize while the menu is visible')
+            end)
+        end,
+    },
+    {
         name = 'permissive trigger still requests on insert-enter (legacy mode)',
         run = function()
             with_trigger_scenario({
@@ -142,6 +179,24 @@ return {
                 helpers.wait_until(function()
                     return get_calls() == 1
                 end, 1000, 'permissive mode must request on insert-enter')
+            end)
+        end,
+    },
+    {
+        name = 'permissive trigger does not request after backspace',
+        run = function()
+            with_trigger_scenario({
+                completion_trigger = 'on_insert',
+            }, function(bufnr, get_calls, app)
+                vim.api.nvim_exec_autocmds('InsertEnter', {})
+                helpers.wait_until(function()
+                    return get_calls() == 1 and extmark_shown(app, bufnr)
+                end, 1000, 'insert-enter must produce the initial suggestion')
+
+                backspace(bufnr)
+                vim.wait(100)
+                helpers.expect_equal(get_calls(), 1, 'backspace must not start another request')
+                helpers.expect_falsy(extmark_shown(app, bufnr), 'backspace must clear the stale suggestion')
             end)
         end,
     },

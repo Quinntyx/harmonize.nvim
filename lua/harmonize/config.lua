@@ -202,6 +202,9 @@ local M = {
     -- 'on_insert' triggers after any pause in insert mode.
     ---@type 'on_type' | 'on_insert'
     completion_trigger = 'on_type',
+    -- Keep requesting and rendering while another completion menu is open.
+    -- The menu is drawn above harmonize's preview when they overlap.
+    show_with_completion_menu = true,
     -- No provider is configured by default: a blank config does nothing
     -- until you set this (see the README's install snippet). The provider
     -- options below still have defaults.

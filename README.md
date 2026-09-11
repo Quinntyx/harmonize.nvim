@@ -277,8 +277,11 @@ default_config = {
     -- complete.
     display = 'line',
     -- When requests fire: 'on_type' only after a character was typed,
-    -- 'on_insert' on any pause in insert mode.
+    -- 'on_insert' on any pause in insert mode except after backspace.
     completion_trigger = 'on_type',
+    -- Keep harmonize active while another completion menu is open. The menu
+    -- is drawn above the ghost text when they overlap.
+    show_with_completion_menu = true,
     -- No provider by default: a blank config does nothing until you set
     -- this. The provider options below still have defaults.
     provider = nil,
