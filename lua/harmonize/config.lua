@@ -195,12 +195,17 @@ local M = {
     -- 'line' overlays the current line, and 'chunk' shows what accept takes.
     ---@type 'below' | 'line' | 'chunk'
     display = 'below',
-    -- Fade each successive accepted chunk by a linear opacity step. The
-    -- minimum keeps long completions readable.
-    chunk_fade = {
-        enabled = true,
-        opacity_step = 0.25,
-        minimum_opacity = 0.1,
+    -- Options that apply only to each display mode. A next_chunk_highlight
+    -- value may be a highlight group name or a #RRGGBB foreground color.
+    -- Chunk mode needs no boundary accent because it only shows the next chunk.
+    display_options = {
+        below = {
+            next_chunk_highlight = 'Special',
+        },
+        line = {
+            next_chunk_highlight = 'Special',
+        },
+        chunk = {},
     },
     -- When requests fire. 'on_type' requests only after a character was
     -- typed: arrow-key moves and scrolling dismiss the ghost text without

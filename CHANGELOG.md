@@ -22,10 +22,11 @@
   that `my_var_name`.
 - Virtual Text: A `toggle` keymap switches automatic completion on and off
   for the current buffer.
-- Successive chunks fade linearly by 25 percentage points by default. Explicit
-  foreground colors make the fade visible with transparent backgrounds. The
-  step, minimum opacity, and feature itself are configurable through
-  `chunk_fade`.
+- The next chunk accepted by Tab uses the theme's `Special` color by default,
+  while the rest of the suggestion keeps the normal ghost-text color. The
+  `display_options.below.next_chunk_highlight` and
+  `display_options.line.next_chunk_highlight` settings accept a highlight group
+  name or a direct `#RRGGBB` color. Chunk display needs no boundary accent.
 - Harmonize remains active while another completion menu is visible by
   default. The menu draws above its preview, and
   `show_with_completion_menu = false` restores suppression.
@@ -53,6 +54,9 @@
   `'on_insert'`), `virtualtext.display_singleline` became `display`
   (`'below'`, `'line'`, or `'chunk'`), and the remaining virtual text options
   lost their prefix.
+- `chunk_fade` was replaced by mode-specific `display_options`. The `below` and
+  `line` modes can accent only the next accepted chunk; `chunk` needs no
+  boundary setting because it does not show the remaining completion.
 - The `quick_start` option became the `llama_cpp` provider plus the
   `auto_start` namespace. The provider talks to llama.cpp's native
   `/infill` endpoint, where the server constructs the FIM prompt with the

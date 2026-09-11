@@ -5,21 +5,6 @@ local Session = require 'harmonize.completion.session'
 local api = vim.api
 local newline_indicator = '↵'
 
----@param foreground integer
----@param background integer
----@param opacity number
----@return integer
-local function fade_color(foreground, background, opacity)
-    local color = 0
-    for shift = 0, 16, 8 do
-        local fg = math.floor(foreground / 2 ^ shift) % 256
-        local bg = math.floor(background / 2 ^ shift) % 256
-        local channel = math.floor(bg + (fg - bg) * opacity + 0.5)
-        color = color + channel * 2 ^ shift
-    end
-    return color
-end
-
 ---@class harmonize.GhostTextView
 local View = {}
 View.__index = View
@@ -75,52 +60,54 @@ function View:is_visible()
     return not not api.nvim_buf_get_extmark_by_id(0, self.ns_id, self.extmark_id, { details = false })[1]
 end
 
----@param index integer one-based chunk index
+---@param mode 'below' | 'line'
 ---@return string highlight_group
-function View:chunk_highlight(index)
-    local fade = self.config.chunk_fade
-    if not fade or not fade.enabled then
+function View:next_chunk_highlight(mode)
+    local options = self.config.display_options and self.config.display_options[mode]
+    local accent = options and options.next_chunk_highlight
+    if type(accent) ~= 'string' or accent == '' then
         return 'HarmonizeVirtualText'
     end
 
-    local step = math.min(1, math.max(0, tonumber(fade.opacity_step) or 0.25))
-    local minimum = math.min(1, math.max(0, tonumber(fade.minimum_opacity) or 0.1))
-    local opacity = math.max(minimum, 1 - (index - 1) * step)
-    local percent = math.floor(opacity * 100 + 0.5)
-    local group = 'HarmonizeVirtualTextOpacity' .. percent
     local attributes = api.nvim_get_hl(0, { name = 'HarmonizeVirtualText', link = false })
-    local normal = api.nvim_get_hl(0, { name = 'Normal', link = false })
-    local background = normal.bg or (vim.o.background == 'light' and 0xffffff or 0x000000)
-    if attributes.fg then
-        attributes.fg = fade_color(attributes.fg, background, opacity)
+    local hex = accent:match '^#(%x%x%x%x%x%x)$'
+    if hex then
+        attributes.fg = tonumber(hex, 16)
+    else
+        local ok, highlight = pcall(api.nvim_get_hl, 0, { name = accent, link = false })
+        if not ok or not highlight.fg then
+            return 'HarmonizeVirtualText'
+        end
+        attributes.fg = highlight.fg
     end
-    attributes.blend = nil
+
+    local group = mode == 'below' and 'HarmonizeNextChunkBelow' or 'HarmonizeNextChunkLine'
     api.nvim_set_hl(0, group, attributes)
     return group
 end
 
 ---@param text string single display line
+---@param mode 'below' | 'line' | 'chunk'
+---@param accepted_prefix? string visible part accepted by the next chunk
 ---@return table[] virt_text
-function View:display_chunks(text)
-    local fade = self.config.chunk_fade
-    if not fade or not fade.enabled then
+function View:display_chunks(text, mode, accepted_prefix)
+    if mode == 'chunk' then
         return { { text, 'HarmonizeVirtualText' } }
     end
 
-    local chunks = {}
-    local remaining = text
-    local index = 1
-    while remaining ~= '' do
-        local chunk, tail = Session.split_chunk(remaining)
-        if chunk == '' or tail == remaining then
-            chunk = remaining
-            tail = ''
-        end
-        chunks[#chunks + 1] = { chunk, self:chunk_highlight(index) }
-        remaining = tail
-        index = index + 1
+    accepted_prefix = accepted_prefix or Session.split_chunk(text)
+    if accepted_prefix == '' or text:sub(1, #accepted_prefix) ~= accepted_prefix then
+        return { { text, 'HarmonizeVirtualText' } }
     end
-    return chunks
+
+    local highlight = self:next_chunk_highlight(mode)
+    if highlight == 'HarmonizeVirtualText' or #accepted_prefix == #text then
+        return { { text, highlight } }
+    end
+    return {
+        { accepted_prefix, highlight },
+        { text:sub(#accepted_prefix + 1), 'HarmonizeVirtualText' },
+    }
 end
 
 ---@param chunks table[] virt_text chunks
@@ -201,7 +188,8 @@ function View:render_inline(chunks)
 end
 
 ---@param chunks table[] virt_text chunks
-function View:render_next_line(chunks)
+---@param indicator_highlight string
+function View:render_next_line(chunks, indicator_highlight)
     self:clear_float()
     local bufnr = api.nvim_get_current_buf()
     if self.rendered_bufnr and self.rendered_bufnr ~= bufnr then
@@ -209,7 +197,7 @@ function View:render_next_line(chunks)
     end
     api.nvim_buf_set_extmark(bufnr, self.ns_id, vim.fn.line '.' - 1, vim.fn.col '.' - 1, {
         id = self.extmark_id,
-        virt_text = { { newline_indicator, self:chunk_highlight(1) } },
+        virt_text = { { newline_indicator, indicator_highlight } },
         virt_text_pos = 'overlay',
         virt_text_hide = true,
         virt_lines = { chunks },
@@ -227,15 +215,20 @@ function View:update(session)
         return
     end
 
+    local mode = self.config.display
+    local next_chunk = Session.split_chunk(suggestion)
     local display_lines = vim.split(suggestion, '\n', { plain = true })
     local text
+    local accepted_prefix
     local next_line = false
-    if self.config.display == 'chunk' then
-        text = Session.split_chunk(suggestion):gsub('\n', newline_indicator)
+    if mode == 'chunk' then
+        text = next_chunk:gsub('\n', newline_indicator)
     elseif display_lines[1] ~= '' then
         text = display_lines[1]
+        accepted_prefix = next_chunk
     else
         text = display_lines[2]
+        accepted_prefix = next_chunk:sub(2)
         next_line = true
     end
 
@@ -244,10 +237,11 @@ function View:update(session)
         return
     end
 
-    local chunks = text == '' and { { ' ', self:chunk_highlight(2) } } or self:display_chunks(text)
+    local chunks = text == '' and { { ' ', 'HarmonizeVirtualText' } }
+        or self:display_chunks(text, mode, accepted_prefix)
     if next_line then
-        self:render_next_line(chunks)
-    elseif self.config.display == 'below' then
+        self:render_next_line(chunks, self:next_chunk_highlight(mode))
+    elseif mode == 'below' then
         self:render_below(chunks)
     else
         self:render_inline(chunks)

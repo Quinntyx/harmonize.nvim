@@ -13,10 +13,10 @@ return {
             helpers.expect_equal(config.auto_trigger_ft, {})
             helpers.expect_equal(config.display, 'below')
             helpers.expect_equal(config.show_with_completion_menu, true)
-            helpers.expect_equal(config.chunk_fade, {
-                enabled = true,
-                opacity_step = 0.25,
-                minimum_opacity = 0.1,
+            helpers.expect_equal(config.display_options, {
+                below = { next_chunk_highlight = 'Special' },
+                line = { next_chunk_highlight = 'Special' },
+                chunk = {},
             })
         end,
     },

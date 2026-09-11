@@ -76,10 +76,14 @@ return {
                 helpers.expect_truthy(config.zindex < 100, 'the completion menu must have higher priority')
                 helpers.expect_equal(vim.api.nvim_get_option_value('wrap', { win = app.view.float_winid }), false)
 
-                local chunks = app.view:display_chunks 'foo(bar).baz'
-                helpers.expect_equal(chunks[1][2], 'HarmonizeVirtualTextOpacity100')
-                helpers.expect_equal(chunks[2][2], 'HarmonizeVirtualTextOpacity75')
-                helpers.expect_equal(chunks[3][2], 'HarmonizeVirtualTextOpacity50')
+                local chunks = app.view:display_chunks('foo(bar).baz', 'below')
+                helpers.expect_equal(chunks, {
+                    { 'foo(', 'HarmonizeNextChunkBelow' },
+                    { 'bar).baz', 'HarmonizeVirtualText' },
+                })
+                local accent = vim.api.nvim_get_hl(0, { name = 'HarmonizeNextChunkBelow' })
+                local special = vim.api.nvim_get_hl(0, { name = 'Special' })
+                helpers.expect_equal(accent.fg, special.fg)
             end)
         end,
     },
@@ -106,45 +110,13 @@ return {
         end,
     },
     {
-        name = 'chunk opacity uses the configured linear falloff and minimum',
+        name = 'line display accepts a direct next-chunk color',
         run = function()
             with_display_scenario({
-                chunk_fade = {
-                    opacity_step = 0.25,
-                    minimum_opacity = 0.5,
+                display = 'line',
+                display_options = {
+                    line = { next_chunk_highlight = '#123456' },
                 },
-            }, {
-                complete = function(_, _, callbacks)
-                    callbacks.on_finish { 'foo(bar)baz.qux' }
-                end,
-            }, function(bufnr, app)
-                type_char(bufnr)
-                helpers.wait_until(function()
-                    return float_text(app) == 'foo(bar)baz.qux'
-                end, 1000, 'the faded suggestion must be shown')
-
-                local chunks = app.view:display_chunks 'foo(bar)baz.qux'
-                helpers.expect_equal(vim.tbl_map(function(chunk)
-                    return chunk[2]
-                end, chunks), {
-                    'HarmonizeVirtualTextOpacity100',
-                    'HarmonizeVirtualTextOpacity75',
-                    'HarmonizeVirtualTextOpacity50',
-                    'HarmonizeVirtualTextOpacity50',
-                })
-                local full = vim.api.nvim_get_hl(0, { name = 'HarmonizeVirtualTextOpacity100' })
-                local faded = vim.api.nvim_get_hl(0, { name = 'HarmonizeVirtualTextOpacity75' })
-                local minimum = vim.api.nvim_get_hl(0, { name = 'HarmonizeVirtualTextOpacity50' })
-                helpers.expect_truthy(full.fg ~= faded.fg, 'the second chunk must use a visibly different color')
-                helpers.expect_truthy(faded.fg ~= minimum.fg, 'successive opacity levels must remain distinct')
-            end)
-        end,
-    },
-    {
-        name = 'chunk opacity can be disabled',
-        run = function()
-            with_display_scenario({
-                chunk_fade = { enabled = false },
             }, {
                 complete = function(_, _, callbacks)
                     callbacks.on_finish { 'foo(bar).baz' }
@@ -152,12 +124,16 @@ return {
             }, function(bufnr, app)
                 type_char(bufnr)
                 helpers.wait_until(function()
-                    return float_text(app) == 'foo(bar).baz'
-                end, 1000, 'the suggestion must be shown')
+                    return extmark_details(app, bufnr) ~= nil
+                end, 1000, 'the line suggestion must be shown')
 
-                helpers.expect_equal(app.view:display_chunks 'foo(bar).baz', {
-                    { 'foo(bar).baz', 'HarmonizeVirtualText' },
+                local details = extmark_details(app, bufnr)
+                helpers.expect_equal(details.virt_text, {
+                    { 'foo(', 'HarmonizeNextChunkLine' },
+                    { 'bar).baz', 'HarmonizeVirtualText' },
                 })
+                local accent = vim.api.nvim_get_hl(0, { name = 'HarmonizeNextChunkLine' })
+                helpers.expect_equal(accent.fg, 0x123456)
             end)
         end,
     },
@@ -166,8 +142,8 @@ return {
         run = function()
             with_display_scenario(nil, {
                 complete = function(_, _, callbacks)
-                    callbacks.on_update '\nfirst line\nsecond line\nthird line'
-                    callbacks.on_finish { '\nfirst line\nsecond line\nthird line' }
+                    callbacks.on_update '\n.first line\nsecond line\nthird line'
+                    callbacks.on_finish { '\n.first line\nsecond line\nthird line' }
                 end,
             }, function(bufnr, app)
                 type_char(bufnr)
@@ -181,8 +157,12 @@ return {
                 local rendered = table.concat(vim.tbl_map(function(chunk)
                     return chunk[1]
                 end, details.virt_lines[1]))
-                helpers.expect_equal(rendered, 'first line')
-                helpers.expect_equal(details.virt_text[1][1], '↵')
+                helpers.expect_equal(rendered, '.first line')
+                helpers.expect_equal(details.virt_text[1], { '↵', 'HarmonizeNextChunkBelow' })
+                helpers.expect_equal(details.virt_lines[1], {
+                    { '.', 'HarmonizeNextChunkBelow' },
+                    { 'first line', 'HarmonizeVirtualText' },
+                })
                 helpers.expect_equal(details.virt_text_pos, 'overlay')
                 helpers.expect_equal(vim.api.nvim_buf_line_count(bufnr), line_count)
                 helpers.expect_falsy(float_text(app), 'newline-leading text must not use the cursor-relative float')
@@ -206,7 +186,7 @@ return {
                 end, 1000, 'the newline indicator must be shown')
 
                 local details = extmark_details(app, bufnr)
-                helpers.expect_equal(details.virt_text[1][1], '↵')
+                helpers.expect_equal(details.virt_text[1], { '↵', 'HarmonizeVirtualText' })
                 helpers.expect_falsy(details.virt_lines, 'chunk display must show only the next accepted chunk')
             end)
         end,
@@ -230,7 +210,7 @@ return {
                 local details = extmark_details(app, bufnr)
                 -- 'foo(' is the whole first chunk: the identifier plus the
                 -- special characters that follow it.
-                helpers.expect_equal(details.virt_text[1][1], 'foo(')
+                helpers.expect_equal(details.virt_text[1], { 'foo(', 'HarmonizeVirtualText' })
                 helpers.expect_equal(details.virt_text_pos, 'overlay')
                 helpers.expect_falsy(details.virt_lines)
             end)

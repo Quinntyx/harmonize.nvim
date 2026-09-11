@@ -15,9 +15,8 @@ the model generates tokens.
 - Chunk-wise acceptance: Tab accepts one cached chunk at a time (the current
   identifier plus the special characters that follow it), so long completions
   arrive in reviewable steps without starting another request.
-- Confidence fade: each successive chunk is 25% less prominent by default.
-  Explicit foreground colors keep the difference visible even with a
-  transparent editor background.
+- Clear acceptance boundary: only the text accepted by the next Tab uses the
+  theme's `Special` color by default. The rest stays fully readable.
 - Completion-menu coexistence: LSP, nvim-cmp, and blink menus are drawn above
   the Harmonize preview while both remain available.
 - Token streaming: the completion is a character stream — the model appends
@@ -141,10 +140,11 @@ require('harmonize').setup {
     -- uses its actual next-line position and shifts following screen text.
     -- 'line' overlays the current line; 'chunk' shows the next accepted chunk.
     display = 'below',
-    chunk_fade = {
-        enabled = true,
-        opacity_step = 0.25,
-        minimum_opacity = 0.1,
+    display_options = {
+        -- Use a highlight group name or a direct #RRGGBB foreground color.
+        below = { next_chunk_highlight = 'Special' },
+        line = { next_chunk_highlight = 'Special' },
+        chunk = {},
     },
     -- When requests fire: 'on_type' only after a character is typed,
     -- 'on_insert' on any pause except after backspace.
@@ -248,6 +248,11 @@ you have not taken yet, and it is redrawn on every token.
   text down. A `↵` at the cursor indicates that the next chunk starts with a
   newline. `display = 'line'` overlays the current line, and `display =
   'chunk'` shows exactly what the next accept completes.
+- `display_options` holds settings specific to each display mode. For `below`
+  and `line`, `next_chunk_highlight` sets the color of only the text accepted by
+  the next Tab. It accepts a highlight group such as `'Special'` or a direct
+  color such as `'#ff8800'`. Chunk mode needs no boundary color because it only
+  shows the next accepted chunk.
 - Typing the same characters keeps the remaining suggestion in sync; typing
   something different dismisses it and starts a fresh request.
 - When a chunk would cross a newline in the middle, it stops first — you never
@@ -292,12 +297,12 @@ default_config = {
     -- uses its actual next-line position and shifts following screen text.
     -- 'line' overlays the current line; 'chunk' shows the next accepted chunk.
     display = 'below',
-    -- Fade successive chunks linearly. 0.25 means 25 percentage points per
-    -- chunk; the minimum keeps the rest readable.
-    chunk_fade = {
-        enabled = true,
-        opacity_step = 0.25,
-        minimum_opacity = 0.1,
+    -- A highlight group uses its foreground color; #RRGGBB is also accepted.
+    -- Chunk mode has no options because it only shows the next accepted chunk.
+    display_options = {
+        below = { next_chunk_highlight = 'Special' },
+        line = { next_chunk_highlight = 'Special' },
+        chunk = {},
     },
     -- When requests fire: 'on_type' only after a character was typed,
     -- 'on_insert' on any pause in insert mode except after backspace.
