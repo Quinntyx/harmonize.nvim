@@ -33,6 +33,11 @@
 - Below previews redraw after scrolling, acceptance keeps the old preview until
   its cached tail is ready, and newline-only suggestions no longer add an empty
   virtual line.
+- Cached completions extend in the background when fewer than two complete
+  newline-terminated lines remain. Extension requests capture context at the
+  predicted endpoint after applying strict existing-text matching, and streamed
+  extension text is appended without replacing the stable tail. Configure the
+  threshold or disable this through `extension_options`.
 - Harmonize remains active while another completion menu is visible by
   default. The menu draws above its preview, and
   `show_with_completion_menu = false` restores suppression.

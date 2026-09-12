@@ -46,6 +46,40 @@ function Session:update_raw(text)
     self:refresh()
 end
 
+--- Start appending a continuation to the current suggestion stream.
+---@return table stream
+---@return string base_raw
+function Session:start_extension()
+    if not self.stream then
+        self.stream = {
+            raw = self.suggestion or '',
+            consumed = 0,
+            done = false,
+        }
+    else
+        self.stream.done = false
+    end
+    return self.stream, self.stream.raw
+end
+
+---@param stream table
+---@param base_raw string
+---@param extension string
+---@return boolean updated
+function Session:update_extension(stream, base_raw, extension)
+    if self.stream ~= stream then
+        return false
+    end
+    stream.raw = base_raw .. extension
+    self:refresh()
+    return true
+end
+
+---@return integer
+function Session:complete_line_count()
+    return select(2, (self.suggestion or ''):gsub('\n', ''))
+end
+
 --- Advance the stream by `typed` when it continues the current suggestion.
 ---@param typed string
 ---@return boolean true when the suggestion advanced

@@ -25,6 +25,10 @@ return {
                 allow_post_newline_chars = '',
             })
             helpers.expect_equal(config.match_existing_text, true)
+            helpers.expect_equal(config.extension_options, {
+                enabled = true,
+                minimum_remaining_lines = 2,
+            })
         end,
     },
     {

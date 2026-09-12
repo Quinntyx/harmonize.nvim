@@ -219,7 +219,8 @@ function Controller:trigger(bufnr)
                 -- user has taken the rest.
                 stream.done = true
                 current:refresh()
-                if not current.suggestion or current.suggestion == '' then
+                self:maybe_extend(current, bufnr)
+                if current.suggestion == '' and not self.request then
                     current:reset()
                 end
                 return
@@ -233,6 +234,7 @@ function Controller:trigger(bufnr)
             end
 
             self:refresh_preview(current)
+            self:maybe_extend(current, bufnr)
         end,
         on_update = function(streamed)
             -- Each update is the complete response received so far. Replacing
@@ -247,6 +249,94 @@ function Controller:trigger(bufnr)
             end
             current:update_raw(streamed)
             self:refresh_preview(current)
+        end,
+    })
+
+    if not finished then
+        self.request = request
+    end
+end
+
+--- Refill a short cached completion using context at its predicted endpoint.
+---@param ctx harmonize.CompletionSession
+---@param bufnr integer
+function Controller:maybe_extend(ctx, bufnr)
+    local options = self.config.extension_options
+    local minimum_lines = options and tonumber(options.minimum_remaining_lines) or 2
+    if
+        not options
+        or options.enabled == false
+        or self.request
+        or bufnr ~= api.nvim_get_current_buf()
+        or not vim.fn.mode():match '^[iR]'
+        or not ctx.suggestion
+        or ctx:complete_line_count() >= minimum_lines
+        or (ctx.stream and not ctx.stream.done)
+    then
+        return
+    end
+
+    local lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local cursor = api.nvim_win_get_cursor(0)
+    local synthetic_lines, synthetic_cursor = Matching.apply_completion(
+        lines,
+        cursor,
+        ctx.suggestion,
+        self.config.chunk_options,
+        self.config.match_existing_text
+    )
+    local snapshot = self.context:capture_synthetic(bufnr, synthetic_lines, synthetic_cursor)
+    local stream, base_raw = ctx:start_extension()
+    local consumed_at_start = stream.consumed
+
+    self.request_generation = self.request_generation + 1
+    local generation = self.request_generation
+    local finished = false
+    local streamed = false
+    local request
+    request = self.backend:complete(snapshot, {
+        on_update = function(extension)
+            if generation ~= self.request_generation then
+                return
+            end
+            local current = self:session(bufnr)
+            if current:update_extension(stream, base_raw, extension) then
+                streamed = true
+                if bufnr == api.nvim_get_current_buf() then
+                    self:refresh_preview(current)
+                end
+            end
+        end,
+        on_finish = function(data)
+            finished = true
+            if generation ~= self.request_generation then
+                return
+            end
+            if self.request == request then
+                self.request = nil
+            end
+
+            local current = self:session(bufnr)
+            if current.stream ~= stream then
+                return
+            end
+            if not streamed then
+                data = self.text.list_dedup(data or {})
+                if data[1] then
+                    current:update_extension(stream, base_raw, data[1])
+                end
+            end
+            stream.done = true
+            current:refresh()
+            if stream.consumed > consumed_at_start then
+                self:maybe_extend(current, bufnr)
+            end
+            if current.suggestion == '' and not self.request then
+                current:reset()
+            end
+            if bufnr == api.nvim_get_current_buf() then
+                self:refresh_preview(current)
+            end
         end,
     })
 
@@ -333,6 +423,9 @@ function Controller:accept()
         return
     end
 
+    local bufnr = api.nvim_get_current_buf()
+    self:maybe_extend(ctx, bufnr)
+
     local cursor = api.nvim_win_get_cursor(0)
     local buffer_lines = api.nvim_buf_get_lines(0, cursor[1] - 1, cursor[1] + 1, false)
     local current_match
@@ -367,6 +460,7 @@ function Controller:accept()
         ctx.event_tick = vim.b.changedtick
         if remaining then
             self:refresh_preview(ctx)
+            self:maybe_extend(ctx, bufnr)
         else
             self.view:clear()
         end
@@ -380,6 +474,8 @@ function Controller:accept_lines(n_lines)
         return
     end
 
+    local bufnr = api.nvim_get_current_buf()
+    self:maybe_extend(ctx, bufnr)
     local lines, remaining = ctx:take_lines(n_lines)
     insert_lines(lines, function()
         self.last_seen_changedtick = vim.b.changedtick
@@ -387,6 +483,7 @@ function Controller:accept_lines(n_lines)
         ctx.event_tick = vim.b.changedtick
         if #remaining > 0 then
             self:refresh_preview(ctx)
+            self:maybe_extend(ctx, bufnr)
         else
             self.view:clear()
         end

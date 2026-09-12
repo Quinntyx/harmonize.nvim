@@ -12,6 +12,7 @@ local function with_trigger_scenario(overrides, scenario)
         display = 'line',
         debounce = 0,
         throttle = 0,
+        extension_options = { enabled = false },
     }, overrides or {}), {
         backend = {
             start = function() end,

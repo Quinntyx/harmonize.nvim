@@ -179,6 +179,20 @@ function Context:capture(bufnr, blink_context)
     return snapshot
 end
 
+--- Capture context from temporary buffer contents without changing the editor.
+---@param bufnr integer original buffer used for cached background context
+---@param lines string[] synthetic buffer contents
+---@param cursor integer[] one-based row and zero-based byte column
+---@return table snapshot
+function Context:capture_synthetic(bufnr, lines, cursor)
+    local snapshot = self.cursor:context(bufnr, {
+        line = lines[cursor[1]],
+        cursor = cursor,
+    }, lines)
+    snapshot.extra = self:snapshot_extra(bufnr, snapshot.covered_lines)
+    return snapshot
+end
+
 ---@param bufnr integer
 ---@param covered { start: integer, end_exclusive: integer? }
 ---@return table[]?

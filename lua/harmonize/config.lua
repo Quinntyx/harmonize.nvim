@@ -216,6 +216,12 @@ local M = {
     -- Match a prediction against the complete text after the cursor. Matching
     -- text is kept in place and the cursor advances over it when accepted.
     match_existing_text = true,
+    -- Refill a cached completion in the background before acceptance exhausts
+    -- it. Only newline-terminated lines count as complete remaining lines.
+    extension_options = {
+        enabled = true,
+        minimum_remaining_lines = 2,
+    },
     -- When requests fire. 'on_type' requests only after a character was
     -- typed: arrow-key moves dismiss ghost text without requesting, scrolling
     -- re-anchors it, and entering insert mode alone does not trigger either.

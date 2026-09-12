@@ -39,8 +39,9 @@ end
 --- Full context snapshot around the cursor in `bufnr`.
 ---@param bufnr integer
 ---@param blink_context harmonize.BlinkCmpContext?
+---@param buffer_lines? string[] synthetic buffer contents
 ---@return table snapshot with lines_before, lines_after, opts and covered_lines
-function CursorCapture:context(bufnr, blink_context)
+function CursorCapture:context(bufnr, blink_context, buffer_lines)
     -- A completed cmp-shaped table (cursor + cursor_before_line +
     -- cursor_after_line) is passed through as-is; everything else is
     -- treated as a blink-cmp context and expanded first.
@@ -53,8 +54,21 @@ function CursorCapture:context(bufnr, blink_context)
     local config = self.config
     local cursor = cmp_context.cursor
 
-    local lines_before_list = vim.api.nvim_buf_get_lines(bufnr, 0, cursor.line, false)
-    local lines_after_list = vim.api.nvim_buf_get_lines(bufnr, cursor.line + 1, -1, false)
+    local lines_before_list
+    local lines_after_list
+    if buffer_lines then
+        lines_before_list = {}
+        for index = 1, cursor.line do
+            lines_before_list[#lines_before_list + 1] = buffer_lines[index]
+        end
+        lines_after_list = {}
+        for index = cursor.line + 2, #buffer_lines do
+            lines_after_list[#lines_after_list + 1] = buffer_lines[index]
+        end
+    else
+        lines_before_list = vim.api.nvim_buf_get_lines(bufnr, 0, cursor.line, false)
+        lines_after_list = vim.api.nvim_buf_get_lines(bufnr, cursor.line + 1, -1, false)
+    end
 
     local lines_before = table.concat(lines_before_list, '\n')
     local lines_after = table.concat(lines_after_list, '\n')

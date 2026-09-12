@@ -122,6 +122,24 @@ return {
         end,
     },
     {
+        name = 'cursor context can read a synthetic buffer without changing the real one',
+        run = function()
+            local cursor = CursorCapture.new(helpers.merged_config { context_window = 100000 })
+            local bufnr = helpers.create_buffer({ 'real buffer' })
+            local synthetic = { 'one', 'twoX', 'three' }
+
+            local context = cursor:context(bufnr, {
+                line = synthetic[2],
+                cursor = { 2, 4 },
+            }, synthetic)
+
+            helpers.expect_equal(context.lines_before, 'one\ntwoX')
+            helpers.expect_equal(context.lines_after, '\nthree')
+            helpers.expect_equal(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), { 'real buffer' })
+            helpers.delete_buffer(bufnr)
+        end,
+    },
+    {
         name = 'cursor context reports truncation in the covered range',
         run = function()
             local cursor = CursorCapture.new(helpers.merged_config {

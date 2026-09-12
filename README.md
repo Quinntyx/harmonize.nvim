@@ -21,8 +21,11 @@ the model generates tokens.
 - Completion-menu coexistence: LSP, nvim-cmp, and blink menus are drawn above
   the Harmonize preview while both remain available.
 - Token streaming: the completion is a character stream — the model appends
-  to the back while typing and Tab take from the front, so the first chunk
+  to the back while typing and Tab takes from the front, so the first chunk
   appears quickly even on slow local models.
+- Background extension: when fewer than two newline-terminated lines remain,
+  Harmonize asks the model to continue from the predicted endpoint and appends
+  the result without replacing the stable cached text.
 - Typing sync: when typed text matches the start of the suggestion, the
   suggestion advances instead of being discarded and re-requested.
 - `llama_cpp` provider for llama.cpp's native `/infill` endpoint, with
@@ -156,6 +159,11 @@ require('harmonize').setup {
     },
     -- Reuse matching text after the cursor instead of inserting duplicates.
     match_existing_text = true,
+    extension_options = {
+        enabled = true,
+        -- Only newline-terminated lines count as complete.
+        minimum_remaining_lines = 2,
+    },
     -- When requests fire: 'on_type' only after a character is typed,
     -- 'on_insert' on any pause except after backspace.
     completion_trigger = 'on_type',
@@ -276,6 +284,13 @@ you have not taken yet, and it is redrawn on every token.
   something different dismisses it and starts a fresh request.
 - Acceptance keeps the existing preview visible until its cached tail is
   redrawn, avoiding a blank frame on slower displays.
+- `extension_options.minimum_remaining_lines` controls when the cached
+  completion is refilled. With the default `2`, fewer than two
+  newline-terminated remaining lines starts one background request. Harmonize
+  builds that request as if the complete cached tail had already been accepted,
+  including matched suffixes and next lines, then appends streamed continuation
+  text to whatever remains. Set `extension_options.enabled = false` to disable
+  this.
 - `accept_line` takes the whole visible line.
 - A `toggle` keymap switches automatic completion on and off (same as
   `:Harmonize virtualtext toggle`).
@@ -334,6 +349,12 @@ default_config = {
     -- Skip matching suffixes and exact matching next lines instead of inserting
     -- duplicate closing characters. Set false for insert-only behavior.
     match_existing_text = true,
+    -- Refill from the predicted endpoint when fewer than this many complete
+    -- newline-terminated lines remain.
+    extension_options = {
+        enabled = true,
+        minimum_remaining_lines = 2,
+    },
     -- When requests fire: 'on_type' only after a character was typed,
     -- 'on_insert' on any pause in insert mode except after backspace.
     completion_trigger = 'on_type',

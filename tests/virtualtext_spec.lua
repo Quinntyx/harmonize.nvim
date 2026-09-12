@@ -8,6 +8,7 @@ local function with_display_scenario(overrides, backend, scenario)
         provider = 'test_display',
         debounce = 0,
         throttle = 0,
+        extension_options = { enabled = false },
     }, overrides or {}), {
         backend = {
             start = function() end,
@@ -393,6 +394,138 @@ return {
                 helpers.expect_equal(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), { 'call()', '    }' })
                 helpers.expect_equal(vim.api.nvim_win_get_cursor(0), { 2, 4 })
                 helpers.expect_falsy(session.suggestion)
+            end)
+        end,
+    },
+    {
+        name = 'a short initial completion starts an extension immediately',
+        run = function()
+            local requests = 0
+            local extension_snapshot
+            with_display_scenario({
+                extension_options = {
+                    enabled = true,
+                    minimum_remaining_lines = 2,
+                },
+            }, {
+                complete = function(_, snapshot, callbacks)
+                    requests = requests + 1
+                    if requests == 1 then
+                        callbacks.on_finish { 'one' }
+                        return
+                    end
+                    extension_snapshot = snapshot
+                    return { cancel = function() end }
+                end,
+            }, function(bufnr)
+                type_char(bufnr)
+                helpers.wait_until(function()
+                    return requests == 2
+                end, 1000, 'the short completion must start a background extension')
+
+                helpers.expect_match(extension_snapshot.lines_before, 'one$')
+                helpers.expect_match(extension_snapshot.lines_after, '^=')
+            end)
+        end,
+    },
+    {
+        name = 'finishing an exhausted initial stream starts an extension',
+        run = function()
+            local requests = 0
+            local initial_callbacks
+            local extension_snapshot
+            with_display_scenario({
+                extension_options = {
+                    enabled = true,
+                    minimum_remaining_lines = 2,
+                },
+            }, {
+                complete = function(_, snapshot, callbacks)
+                    requests = requests + 1
+                    if requests == 1 then
+                        initial_callbacks = callbacks
+                    else
+                        extension_snapshot = snapshot
+                    end
+                    return { cancel = function() end }
+                end,
+            }, function(bufnr, app)
+                type_char(bufnr)
+                helpers.wait_until(function()
+                    return initial_callbacks ~= nil
+                end, 1000, 'the initial stream must start')
+
+                initial_callbacks.on_update 'one'
+                app.controller:accept()
+                vim.wait(100)
+                helpers.expect_equal(app.controller:session(bufnr).suggestion, '')
+
+                initial_callbacks.on_finish {}
+                helpers.expect_equal(requests, 2)
+                helpers.expect_match(extension_snapshot.lines_before, 'one$')
+            end)
+        end,
+    },
+    {
+        name = 'acceptance extends a short completion from its predicted endpoint',
+        run = function()
+            local requests = 0
+            local extension_callbacks
+            local extension_snapshot
+            with_display_scenario({
+                extension_options = {
+                    enabled = true,
+                    minimum_remaining_lines = 2,
+                },
+            }, {
+                complete = function(_, snapshot, callbacks)
+                    requests = requests + 1
+                    extension_snapshot = snapshot
+                    extension_callbacks = callbacks
+                    return { cancel = function() end }
+                end,
+            }, function(bufnr, app)
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { '' })
+                vim.api.nvim_win_set_cursor(0, { 1, 0 })
+                local session = app.controller:session(bufnr)
+                session.suggestion = 'one'
+                app.view:update(session)
+
+                app.controller:accept()
+                vim.wait(100)
+                helpers.expect_equal(requests, 1)
+                helpers.expect_match(extension_snapshot.lines_before, 'one$')
+                helpers.expect_equal(vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1], 'one')
+                helpers.expect_equal(session.suggestion, '')
+
+                extension_callbacks.on_update '\ntwo\nthree'
+                helpers.expect_equal(session.suggestion, '\ntwo\nthree')
+                helpers.expect_truthy(extmark_details(app, bufnr), 'the appended continuation must be shown')
+                extension_callbacks.on_finish {}
+                helpers.expect_equal(requests, 1, 'one acceptance must start at most one extension')
+            end)
+        end,
+    },
+    {
+        name = 'two complete remaining lines do not trigger an extension',
+        run = function()
+            local requests = 0
+            with_display_scenario({
+                extension_options = {
+                    enabled = true,
+                    minimum_remaining_lines = 2,
+                },
+            }, {
+                complete = function()
+                    requests = requests + 1
+                end,
+            }, function(bufnr, app)
+                local session = app.controller:session(bufnr)
+                session.suggestion = 'one\ntwo\nthree'
+                app.view:update(session)
+                app.controller:accept()
+                vim.wait(100)
+                helpers.expect_equal(requests, 0)
             end)
         end,
     },

@@ -40,4 +40,21 @@ return {
             helpers.expect_equal(remaining, 'method()')
         end,
     },
+    {
+        name = 'an extension can refill a completion after its cached text is consumed',
+        run = function()
+            local session = Session.new()
+            session.suggestion = 'one'
+            local stream, base = session:start_extension()
+
+            local chunk, remaining = session:take_chunk()
+            helpers.expect_equal(chunk, 'one')
+            helpers.expect_equal(remaining, '')
+            helpers.expect_equal(session.suggestion, '')
+
+            helpers.expect_truthy(session:update_extension(stream, base, ' two\nthree'))
+            helpers.expect_equal(session.suggestion, ' two\nthree')
+            helpers.expect_equal(session:complete_line_count(), 1)
+        end,
+    },
 }
