@@ -21,6 +21,10 @@ return {
                 line = { next_chunk_highlight = 'Special' },
                 chunk = {},
             })
+            helpers.expect_equal(config.chunk_options, {
+                allow_post_newline_chars = '',
+            })
+            helpers.expect_equal(config.match_existing_text, true)
         end,
     },
     {

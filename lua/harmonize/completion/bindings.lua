@@ -62,6 +62,7 @@ function Bindings:setup()
         InsertEnter = 'on_insert_enter',
         BufEnter = 'on_buf_enter',
         CursorMovedI = 'on_cursor_moved_i',
+        WinScrolled = 'on_win_scrolled',
         TextChangedI = 'on_text_changed_i',
         TextChangedP = 'on_text_changed_p',
     }

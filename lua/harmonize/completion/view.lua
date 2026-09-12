@@ -1,5 +1,6 @@
 --- Ghost text rendering: owns the namespace, inline extmark, and below-line
 --- floating preview. Renders suggestions without knowing about requests.
+local Matching = require 'harmonize.completion.matching'
 local Session = require 'harmonize.completion.session'
 
 local api = vim.api
@@ -123,7 +124,7 @@ function View:display_chunks(text, mode, accepted_prefix)
     end
 
     local text_highlight = self:text_highlight(mode)
-    accepted_prefix = accepted_prefix or Session.split_chunk(text)
+    accepted_prefix = accepted_prefix or Session.split_chunk(text, self.config.chunk_options)
     if accepted_prefix == '' or text:sub(1, #accepted_prefix) ~= accepted_prefix then
         return { { text, text_highlight } }
     end
@@ -139,8 +140,22 @@ function View:display_chunks(text, mode, accepted_prefix)
 end
 
 ---@param chunks table[] virt_text chunks
-function View:render_below(chunks)
-    self:clear_extmark()
+---@param displacement? integer screen cells reserved before the existing suffix
+function View:render_below(chunks, displacement)
+    local current_bufnr = api.nvim_get_current_buf()
+    if displacement and displacement > 0 then
+        if self.rendered_bufnr and self.rendered_bufnr ~= current_bufnr then
+            self:clear_extmark()
+        end
+        api.nvim_buf_set_extmark(current_bufnr, self.ns_id, vim.fn.line '.' - 1, vim.fn.col '.' - 1, {
+            id = self.extmark_id,
+            virt_text = { { string.rep(' ', displacement), 'Normal' } },
+            virt_text_pos = 'inline',
+        })
+        self.rendered_bufnr = current_bufnr
+    else
+        self:clear_extmark()
+    end
 
     local text_parts = {}
     for _, chunk in ipairs(chunks) do
@@ -215,7 +230,7 @@ function View:render_inline(chunks)
     self.rendered_bufnr = bufnr
 end
 
----@param chunks table[] virt_text chunks
+---@param chunks? table[] virt_text chunks
 ---@param indicator_highlight string
 function View:render_next_line(chunks, indicator_highlight)
     self:clear_float()
@@ -223,14 +238,17 @@ function View:render_next_line(chunks, indicator_highlight)
     if self.rendered_bufnr and self.rendered_bufnr ~= bufnr then
         self:clear_extmark()
     end
-    api.nvim_buf_set_extmark(bufnr, self.ns_id, vim.fn.line '.' - 1, vim.fn.col '.' - 1, {
+    local extmark = {
         id = self.extmark_id,
         virt_text = { { newline_indicator, indicator_highlight } },
         virt_text_pos = 'overlay',
         virt_text_hide = true,
-        virt_lines = { chunks },
         hl_mode = 'replace',
-    })
+    }
+    if chunks then
+        extmark.virt_lines = { chunks }
+    end
+    api.nvim_buf_set_extmark(bufnr, self.ns_id, vim.fn.line '.' - 1, vim.fn.col '.' - 1, extmark)
     self.rendered_bufnr = bufnr
 end
 
@@ -244,7 +262,7 @@ function View:update(session)
     end
 
     local mode = self.config.display
-    local next_chunk = Session.split_chunk(suggestion)
+    local next_chunk = Session.split_chunk(suggestion, self.config.chunk_options)
     local display_lines = vim.split(suggestion, '\n', { plain = true })
     local text
     local accepted_prefix
@@ -265,12 +283,33 @@ function View:update(session)
         return
     end
 
-    local chunks = text == '' and { { ' ', self:text_highlight(mode) } }
-        or self:display_chunks(text, mode, accepted_prefix)
+    local chunks
+    if text ~= '' then
+        chunks = self:display_chunks(text, mode, accepted_prefix)
+    end
+    local displacement
+    local next_line_matches = false
+    if self.config.match_existing_text then
+        local cursor = api.nvim_win_get_cursor(0)
+        local lines = api.nvim_buf_get_lines(0, cursor[1] - 1, cursor[1] + 1, false)
+        if next_line then
+            next_line_matches = Matching.next_line(suggestion, lines[2]) ~= nil
+        elseif mode == 'below' then
+            local line_suffix = lines[1]:sub(cursor[2] + 1)
+            local match = Matching.current_line(suggestion, line_suffix)
+            if match then
+                displacement = vim.fn.strdisplaywidth(match.prefix)
+            end
+        end
+    end
+
     if next_line then
+        if next_line_matches then
+            chunks = nil
+        end
         self:render_next_line(chunks, self:next_chunk_highlight(mode))
     elseif mode == 'below' then
-        self:render_below(chunks)
+        self:render_below(chunks, displacement)
     else
         self:render_inline(chunks)
     end

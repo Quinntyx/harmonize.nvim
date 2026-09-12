@@ -11,15 +11,11 @@
   `'chunk'` shows exactly what the `accept` keymap completes. Below-line floats
   remain fixed at the cursor when clipped instead of shifting left.
 - Virtual Text: `accept` is now the accept action, taking the completion one
-  chunk at a time, where a chunk is the current identifier plus the special
-  characters that follow it (for example `foo.bar(a, b).baz(c)` is accepted
-  as `foo.` `bar(` `a, ` `b).` `baz(` `c)`). A chunk never crosses a newline
-  unless the newline is the first character of the completion, matching what
-  the line display shows; a run like `)\n.` is accepted as
-  `)` and then `\n.`. When the identifier of the current chunk has already
-  been typed, the special characters that follow it end that chunk: after
-  typing the `r` of `r#my_var_name`, the next chunk is `#` and only after
-  that `my_var_name`.
+  chunk at a time. Spaces and tabs terminate a chunk after the whitespace run,
+  so `data_ == other` is accepted as `data_ `, `== `, and `other`. A leading
+  newline is its own chunk with its indentation. Characters listed in
+  `chunk_options.allow_post_newline_chars`, such as `.`, may be included after
+  that indentation.
 - Virtual Text: A `toggle` keymap switches automatic completion on and off
   for the current buffer.
 - The next chunk accepted by Tab uses the theme's `Special` color by default,
@@ -30,6 +26,13 @@
   default so they remain distinct from the code underneath. The
   `display_options.below.background_highlight` setting accepts the same forms.
   Chunk display needs no extra styling.
+- Strict existing-text matching can reuse a predicted closing suffix or an
+  exact predicted next line instead of inserting a duplicate. Below mode shifts
+  the existing suffix to show its predicted position. Set
+  `match_existing_text = false` for insert-only behavior.
+- Below previews redraw after scrolling, acceptance keeps the old preview until
+  its cached tail is ready, and newline-only suggestions no longer add an empty
+  virtual line.
 - Harmonize remains active while another completion menu is visible by
   default. The menu draws above its preview, and
   `show_with_completion_menu = false` restores suppression.

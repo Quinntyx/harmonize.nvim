@@ -208,9 +208,17 @@ local M = {
         },
         chunk = {},
     },
+    -- Whitespace ends a chunk. A newline chunk includes its indentation and
+    -- may also include any characters listed here, such as '.' for chains.
+    chunk_options = {
+        allow_post_newline_chars = '',
+    },
+    -- Match a prediction against the complete text after the cursor. Matching
+    -- text is kept in place and the cursor advances over it when accepted.
+    match_existing_text = true,
     -- When requests fire. 'on_type' requests only after a character was
-    -- typed: arrow-key moves and scrolling dismiss the ghost text without
-    -- requesting, and entering insert mode alone does not trigger either.
+    -- typed: arrow-key moves dismiss ghost text without requesting, scrolling
+    -- re-anchors it, and entering insert mode alone does not trigger either.
     -- 'on_insert' triggers after any pause in insert mode.
     ---@type 'on_type' | 'on_insert'
     completion_trigger = 'on_type',

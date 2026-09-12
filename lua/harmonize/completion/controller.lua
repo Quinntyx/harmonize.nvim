@@ -1,6 +1,7 @@
 --- Completion controller: orchestrates context capture, backend requests,
 --- stream consumption, and ghost-text rendering for one app instance. All
 --- per-buffer completion state lives in CompletionSession objects owned here.
+local Matching = require 'harmonize.completion.matching'
 local Session = require 'harmonize.completion.session'
 
 local api = vim.api
@@ -43,7 +44,7 @@ function Controller:session(bufnr)
     end
     local session = self.sessions[bufnr]
     if not session then
-        session = Session.new()
+        session = Session.new(self.config.chunk_options)
         self.sessions[bufnr] = session
     end
     return session
@@ -227,6 +228,7 @@ function Controller:trigger(bufnr)
             data = self.text.list_dedup(data or {})
 
             if data[1] then
+                current.stream = nil
                 current.suggestion = data[1]
             end
 
@@ -293,7 +295,8 @@ end
 --- restores the buffer state on pum close.
 ---@param lines string[]
 ---@param on_inserted? fun()
-local function insert_lines(lines, on_inserted)
+---@param target_cursor? integer[]
+local function insert_lines(lines, on_inserted, target_cursor)
     local cursor = api.nvim_win_get_cursor(0)
     local line, col = cursor[1] - 1, cursor[2]
 
@@ -302,13 +305,19 @@ local function insert_lines(lines, on_inserted)
     end
 
     vim.schedule(function()
-        api.nvim_buf_set_text(0, line, col, line, col, lines)
-        local new_col = #lines[#lines]
-        -- For single-line insertions, adjust the column by the current offset.
-        if #lines == 1 then
-            new_col = new_col + col
+        if #lines > 1 or lines[1] ~= '' then
+            api.nvim_buf_set_text(0, line, col, line, col, lines)
         end
-        api.nvim_win_set_cursor(0, { line + #lines, new_col })
+        if target_cursor then
+            api.nvim_win_set_cursor(0, target_cursor)
+        else
+            local new_col = #lines[#lines]
+            -- For single-line insertions, adjust the column by the current offset.
+            if #lines == 1 then
+                new_col = new_col + col
+            end
+            api.nvim_win_set_cursor(0, { line + #lines, new_col })
+        end
         if on_inserted then
             on_inserted()
         end
@@ -319,14 +328,38 @@ end
 --- rest available for further acceptance.
 function Controller:accept()
     local ctx = self:session()
-    if not self:current_suggestion(ctx) then
+    local suggestion = self:current_suggestion(ctx)
+    if not suggestion then
         return
+    end
+
+    local cursor = api.nvim_win_get_cursor(0)
+    local buffer_lines = api.nvim_buf_get_lines(0, cursor[1] - 1, cursor[1] + 1, false)
+    local current_match
+    local next_line_match
+    if self.config.match_existing_text then
+        current_match = Matching.current_line(suggestion, buffer_lines[1]:sub(cursor[2] + 1))
+        next_line_match = Matching.next_line(suggestion, buffer_lines[2])
     end
 
     local chunk, remaining = ctx:take_chunk()
     local lines = vim.split(chunk, '\n', { plain = true })
+    local target_cursor
+    if next_line_match and chunk:sub(1, 1) == '\n' then
+        local after_newline = chunk:sub(2)
+        if next_line_match:sub(1, #after_newline) == after_newline then
+            lines = { '' }
+            target_cursor = { cursor[1] + 1, #after_newline }
+        end
+    elseif current_match and not chunk:find('\n', 1, true) then
+        local insert_length = math.min(#chunk, #current_match.prefix)
+        local matched = chunk:sub(insert_length + 1)
+        if matched == current_match.suffix:sub(1, #matched) then
+            lines = { chunk:sub(1, insert_length) }
+            target_cursor = { cursor[1], cursor[2] + #chunk }
+        end
+    end
 
-    self.view:clear()
     insert_lines(lines, function()
         -- Accepting changes the buffer without invalidating the cached tail.
         self.last_seen_changedtick = vim.b.changedtick
@@ -334,8 +367,10 @@ function Controller:accept()
         ctx.event_tick = vim.b.changedtick
         if remaining then
             self:refresh_preview(ctx)
+        else
+            self.view:clear()
         end
-    end)
+    end, target_cursor)
 end
 
 ---@param n_lines? integer number of lines to accept; nil accepts everything
@@ -346,13 +381,14 @@ function Controller:accept_lines(n_lines)
     end
 
     local lines, remaining = ctx:take_lines(n_lines)
-    self.view:clear()
     insert_lines(lines, function()
         self.last_seen_changedtick = vim.b.changedtick
         ctx.event_pos = api.nvim_win_get_cursor(0)
         ctx.event_tick = vim.b.changedtick
         if #remaining > 0 then
             self:refresh_preview(ctx)
+        else
+            self.view:clear()
         end
     end)
 end
@@ -486,6 +522,14 @@ end
 
 function Controller:on_cursor_hold_i()
     self:refresh_preview(self:session())
+end
+
+--- Re-anchor a visible floating preview after the window viewport changes.
+function Controller:on_win_scrolled()
+    local ctx = self:session()
+    if ctx.shown then
+        self:refresh_preview(ctx)
+    end
 end
 
 function Controller:on_text_changed_p()

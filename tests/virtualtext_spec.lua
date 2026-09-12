@@ -172,8 +172,7 @@ return {
                 helpers.expect_equal(rendered, '.first line')
                 helpers.expect_equal(details.virt_text[1], { ' ↵', 'HarmonizeNextChunkBelow' })
                 helpers.expect_equal(details.virt_lines[1], {
-                    { '.', 'HarmonizeNextChunkBelow' },
-                    { 'first line', 'HarmonizeVirtualTextBelow' },
+                    { '.first line', 'HarmonizeVirtualTextBelow' },
                 })
                 helpers.expect_equal(details.virt_text_pos, 'overlay')
                 helpers.expect_equal(vim.api.nvim_buf_line_count(bufnr), line_count)
@@ -274,6 +273,148 @@ return {
                 local binding = vim.fn.maparg('<M-b>', 'i', false, true)
                 helpers.expect_truthy(binding.callback or binding.rhs, 'the trigger key must be bound')
                 helpers.expect_equal(binding.desc, '[harmonize] manually request a completion')
+            end)
+        end,
+    },
+    {
+        name = 'newline-only suggestions do not add a blank virtual line',
+        run = function()
+            with_display_scenario(nil, {
+                complete = function(_, _, callbacks)
+                    callbacks.on_finish { '\n' }
+                end,
+            }, function(bufnr, app)
+                type_char(bufnr)
+                helpers.wait_until(function()
+                    return extmark_details(app, bufnr) ~= nil
+                end, 1000, 'the newline indicator must be shown')
+
+                local details = extmark_details(app, bufnr)
+                helpers.expect_equal(details.virt_text[1][1], ' ↵')
+                helpers.expect_falsy(details.virt_lines, 'a newline without text must not create a screen-line gap')
+            end)
+        end,
+    },
+    {
+        name = 'scrolling redraws a visible below-line preview',
+        run = function()
+            with_display_scenario(nil, {
+                complete = function(_, _, callbacks)
+                    callbacks.on_finish { 'suggestion' }
+                end,
+            }, function(bufnr, app)
+                type_char(bufnr)
+                helpers.wait_until(function()
+                    return float_text(app) == 'suggestion'
+                end, 1000, 'the below-line suggestion must be shown')
+
+                local redraws = 0
+                local update = app.view.update
+                app.view.update = function(view, session)
+                    redraws = redraws + 1
+                    return update(view, session)
+                end
+                vim.api.nvim_exec_autocmds('WinScrolled', { buffer = bufnr })
+                helpers.expect_equal(redraws, 1)
+            end)
+        end,
+    },
+    {
+        name = 'matching displaces and then skips an existing line suffix',
+        run = function()
+            with_display_scenario(nil, {
+                complete = function() end,
+            }, function(bufnr, app)
+                local line = 'foo(a, b, c, )'
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { line })
+                vim.api.nvim_win_set_cursor(0, { 1, #line - 1 })
+                local session = app.controller:session(bufnr)
+                session.suggestion = 'bar)\n'
+                app.view:update(session)
+
+                local details = extmark_details(app, bufnr)
+                helpers.expect_equal(details.virt_text_pos, 'inline')
+                helpers.expect_equal(details.virt_text[1][1], '   ')
+                helpers.expect_equal(float_text(app), 'bar)')
+
+                app.controller:accept()
+                vim.wait(100)
+                helpers.expect_equal(vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1], 'foo(a, b, c, bar)')
+                -- Headless normal mode clamps the API cursor to the final byte;
+                -- in insert mode this is the insertion point after the paren.
+                helpers.expect_equal(vim.api.nvim_win_get_cursor(0), { 1, #'foo(a, b, c, bar)' - 1 })
+                helpers.expect_equal(session.suggestion, '\n')
+            end)
+        end,
+    },
+    {
+        name = 'existing suffix matching can be disabled',
+        run = function()
+            with_display_scenario({
+                match_existing_text = false,
+            }, {
+                complete = function() end,
+            }, function(bufnr, app)
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { 'call)' })
+                vim.api.nvim_win_set_cursor(0, { 1, 4 })
+                local session = app.controller:session(bufnr)
+                session.suggestion = ')'
+
+                app.controller:accept()
+                vim.wait(100)
+                helpers.expect_equal(vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1], 'call))')
+            end)
+        end,
+    },
+    {
+        name = 'matching reuses an identical predicted next line',
+        run = function()
+            with_display_scenario(nil, {
+                complete = function() end,
+            }, function(bufnr, app)
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { 'call()', '    }' })
+                vim.api.nvim_win_set_cursor(0, { 1, #'call()' })
+                local session = app.controller:session(bufnr)
+                session.suggestion = '\n    }'
+                app.view:update(session)
+
+                helpers.expect_falsy(
+                    extmark_details(app, bufnr).virt_lines,
+                    'an existing matching next line must not be duplicated on screen'
+                )
+                app.controller:accept()
+                vim.wait(100)
+                helpers.expect_equal(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), { 'call()', '    }' })
+                helpers.expect_equal(vim.api.nvim_win_get_cursor(0), { 2, 4 })
+                helpers.expect_equal(session.suggestion, '}')
+
+                app.controller:accept()
+                vim.wait(100)
+                helpers.expect_equal(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), { 'call()', '    }' })
+                helpers.expect_equal(vim.api.nvim_win_get_cursor(0), { 2, 4 })
+                helpers.expect_falsy(session.suggestion)
+            end)
+        end,
+    },
+    {
+        name = 'accept redraws a cached below preview without replacing its float',
+        run = function()
+            with_display_scenario(nil, {
+                complete = function(_, _, callbacks)
+                    callbacks.on_finish { 'foo(bar)' }
+                end,
+            }, function(bufnr, app)
+                type_char(bufnr)
+                helpers.wait_until(function()
+                    return float_text(app) == 'foo(bar)'
+                end, 1000, 'the below-line suggestion must be shown')
+
+                local winid = app.view.float_winid
+                app.controller:accept()
+                helpers.expect_equal(app.view.float_winid, winid)
+                vim.wait(100)
+                helpers.expect_equal(app.view.float_winid, winid)
+                helpers.expect_equal(float_text(app), 'bar)')
             end)
         end,
     },

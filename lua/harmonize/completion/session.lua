@@ -5,8 +5,10 @@
 local Session = {}
 Session.__index = Session
 
-function Session.new()
+---@param chunk_options? table
+function Session.new(chunk_options)
     return setmetatable({
+        chunk_options = chunk_options or {},
         suggestion = nil,
         shown = nil,
         last_pos = nil,
@@ -68,29 +70,57 @@ end
 --- character at a time: consume alphanumeric characters and underscores, and
 --- the first special character switches to terminating mode. In that mode the
 --- next alphanumeric character ends the chunk and is excluded from it, so a
---- chunk is one identifier plus the special characters that follow it. When
---- the suggestion starts with special characters, those close out the
---- previous chunk (its identifier was already typed): after typing "r" of
---- "r#my_var_name", the next chunk is "#" and only then "my_var_name".
+--- chunk is one identifier plus the special characters that follow it. A run
+--- of spaces or tabs ends the chunk after that whitespace, so "value == other"
+--- splits as "value ", "== ", and "other". When the suggestion starts with
+--- special characters, those close out the previous chunk (its identifier was
+--- already typed): after typing "r" of "r#my_var_name", the next chunk is "#"
+--- and only then "my_var_name".
 ---
---- A chunk never crosses a newline unless the newline is the first character
---- of the suggestion. That is the only case in which the line display shows
---- the line below, so accepting a chunk never inserts text the view did
---- not show; a run like ")\n." is split into two chunks (")" and "\n.").
+--- A chunk never crosses a newline unless the newline is its first character.
+--- Such a chunk contains the newline and its indentation. Configured
+--- allow_post_newline_chars may include punctuation such as "." after it.
 ---@param suggestion string
+---@param options? table
 ---@return string, string the next chunk and the remaining suggestion
-function Session.split_chunk(suggestion)
+function Session.split_chunk(suggestion, options)
+    options = options or {}
+    local allowed_after_newline = options.allow_post_newline_chars or ''
     local terminates = false
 
     for pos = 1, #suggestion do
         local byte = suggestion:byte(pos)
         if byte == 10 then
-            -- A newline may only lead a chunk: it ends the chunk anywhere else.
-            if pos == 1 then
-                terminates = true
-            else
+            if pos ~= 1 then
                 return suggestion:sub(1, pos - 1), suggestion:sub(pos)
             end
+
+            local chunk_end = 1
+            while chunk_end < #suggestion do
+                local next_byte = suggestion:byte(chunk_end + 1)
+                if next_byte ~= 32 and next_byte ~= 9 then
+                    break
+                end
+                chunk_end = chunk_end + 1
+            end
+            while chunk_end < #suggestion do
+                local character = suggestion:sub(chunk_end + 1, chunk_end + 1)
+                if not allowed_after_newline:find(character, 1, true) then
+                    break
+                end
+                chunk_end = chunk_end + 1
+            end
+            return suggestion:sub(1, chunk_end), suggestion:sub(chunk_end + 1)
+        elseif byte == 32 or byte == 9 then
+            local chunk_end = pos
+            while chunk_end < #suggestion do
+                local next_byte = suggestion:byte(chunk_end + 1)
+                if next_byte ~= 32 and next_byte ~= 9 then
+                    break
+                end
+                chunk_end = chunk_end + 1
+            end
+            return suggestion:sub(1, chunk_end), suggestion:sub(chunk_end + 1)
         elseif byte == 95 or (byte >= 48 and byte <= 57) or (byte >= 65 and byte <= 90) or (byte >= 97 and byte <= 122) then
             -- Alphanumeric or underscore. In terminating mode the chunk ends
             -- here, leaving this character and the rest for the next chunk.
@@ -110,7 +140,7 @@ end
 --- whether any suggestion remains.
 ---@return string chunk, string? remaining nil when the session reset
 function Session:take_chunk()
-    local chunk, remaining = Session.split_chunk(self.suggestion)
+    local chunk, remaining = Session.split_chunk(self.suggestion, self.chunk_options)
 
     -- Taking a chunk counts as taking it from the stream, so the ghost
     -- continues with what follows and the next accept takes the chunk after

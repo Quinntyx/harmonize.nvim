@@ -12,9 +12,9 @@ the model generates tokens.
   new line, a `↵` at the cursor marks what Tab will insert, the next line is
   shown in its actual position, and following screen text moves down. Long
   lines are clipped at the window edge instead of wrapping.
-- Chunk-wise acceptance: Tab accepts one cached chunk at a time (the current
-  identifier plus the special characters that follow it), so long completions
-  arrive in reviewable steps without starting another request.
+- Chunk-wise acceptance: Tab accepts one cached chunk at a time. Whitespace and
+  newlines provide clear boundaries, so long completions arrive in reviewable
+  steps without starting another request.
 - Clear acceptance boundary: only the text accepted by the next Tab uses the
   theme's `Special` color by default. The rest stays fully readable, and below
   previews use the completion menu's background to stand apart from code.
@@ -150,6 +150,12 @@ require('harmonize').setup {
         line = { next_chunk_highlight = 'Special' },
         chunk = {},
     },
+    chunk_options = {
+        -- Use '.' here to accept a method-chain dot with a newline.
+        allow_post_newline_chars = '',
+    },
+    -- Reuse matching text after the cursor instead of inserting duplicates.
+    match_existing_text = true,
     -- When requests fire: 'on_type' only after a character is typed,
     -- 'on_insert' on any pause except after backspace.
     completion_trigger = 'on_type',
@@ -236,21 +242,23 @@ The completion is a character stream: the model keeps appending tokens to the
 back while you take from the front. The visible suggestion is always the part
 you have not taken yet, and it is redrawn on every token.
 
-- **Tab** (`accept`) accepts one chunk. A chunk walk consumes
-  alphanumeric characters and underscores; the first special character
-  switches to terminating mode, in which the next alphanumeric character ends
-  the chunk. A newline ends the chunk unless it is the first character (the
-  case in which the line below is shown). So `b)\n.c()` is accepted as `b)`,
-  then `\n.`, then `c()`.
-- By default, requests fire only after you actually type a character:
-  arrow-key moves and scrolling only dismiss a stale suggestion, and entering
-  insert mode alone does not trigger a request. Set
+- **Tab** (`accept`) accepts one chunk. A chunk walk consumes alphanumeric
+  characters and underscores; punctuation ends before the next identifier.
+  Spaces and tabs end the chunk after the complete whitespace run, so
+  `data_ == other` is accepted as `data_ `, then `== `, then `other`.
+  A newline chunk contains only the newline and its indentation by default.
+  Set `chunk_options.allow_post_newline_chars = '.'` to accept a method-chain
+  dot with the newline.
+- By default, requests fire only after you actually type a character. Arrow-key
+  moves dismiss a stale suggestion, scrolling re-anchors a visible below-line
+  preview, and entering insert mode alone does not trigger a request. Set
   `completion_trigger = 'on_insert'` to request on any pause instead.
 - `display = 'below'` overlays same-line completions beneath the cursor without
   adding a buffer line. A newline-leading completion uses an in-place virtual
   line so it appears where accepting it will put it and shifts following screen
   text down. A `↵` at the cursor indicates that the next chunk starts with a
-  newline. `display = 'line'` overlays the current line, and `display =
+  newline. A newline-only suggestion does not add an empty virtual line.
+  `display = 'line'` overlays the current line, and `display =
   'chunk'` shows exactly what the next accept completes.
 - `display_options` holds settings specific to each display mode. For `below`
   and `line`, `next_chunk_highlight` sets the color of only the text accepted by
@@ -259,10 +267,15 @@ you have not taken yet, and it is redrawn on every token.
   accept a highlight group such as `'Special'` or a direct color such as
   `'#ff8800'`. Chunk mode needs no extra styling because it only shows the next
   accepted chunk.
+- With `match_existing_text = true`, a prediction is matched only when its line
+  ends with all existing text after the cursor. The preview displaces that text
+  to show its final position, and acceptance moves over matching characters
+  instead of duplicating them. A newline-leading prediction similarly reuses
+  the next buffer line only when that whole line matches exactly.
 - Typing the same characters keeps the remaining suggestion in sync; typing
   something different dismisses it and starts a fresh request.
-- When a chunk would cross a newline in the middle, it stops first — you never
-  accept text the view did not show.
+- Acceptance keeps the existing preview visible until its cached tail is
+  redrawn, avoiding a blank frame on slower displays.
 - `accept_line` takes the whole visible line.
 - A `toggle` keymap switches automatic completion on and off (same as
   `:Harmonize virtualtext toggle`).
@@ -313,6 +326,14 @@ default_config = {
         line = { next_chunk_highlight = 'Special' },
         chunk = {},
     },
+    -- Newlines accept indentation only. Add characters such as '.' when they
+    -- should be accepted in the same chunk as a leading newline.
+    chunk_options = {
+        allow_post_newline_chars = '',
+    },
+    -- Skip matching suffixes and exact matching next lines instead of inserting
+    -- duplicate closing characters. Set false for insert-only behavior.
+    match_existing_text = true,
     -- When requests fire: 'on_type' only after a character was typed,
     -- 'on_insert' on any pause in insert mode except after backspace.
     completion_trigger = 'on_type',
