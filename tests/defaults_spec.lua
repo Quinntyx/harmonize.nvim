@@ -14,7 +14,10 @@ return {
             helpers.expect_equal(config.display, 'below')
             helpers.expect_equal(config.show_with_completion_menu, true)
             helpers.expect_equal(config.display_options, {
-                below = { next_chunk_highlight = 'Special' },
+                below = {
+                    next_chunk_highlight = 'Special',
+                    background_highlight = 'Pmenu',
+                },
                 line = { next_chunk_highlight = 'Special' },
                 chunk = {},
             })

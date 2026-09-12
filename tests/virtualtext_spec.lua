@@ -75,15 +75,23 @@ return {
                 helpers.expect_equal(position, { cursor[1], cursor[2] })
                 helpers.expect_truthy(config.zindex < 100, 'the completion menu must have higher priority')
                 helpers.expect_equal(vim.api.nvim_get_option_value('wrap', { win = app.view.float_winid }), false)
+                helpers.expect_equal(
+                    vim.api.nvim_get_option_value('winhl', { win = app.view.float_winid }),
+                    'Normal:HarmonizeVirtualTextBelow,NormalNC:HarmonizeVirtualTextBelow'
+                )
 
                 local chunks = app.view:display_chunks('foo(bar).baz', 'below')
                 helpers.expect_equal(chunks, {
                     { 'foo(', 'HarmonizeNextChunkBelow' },
-                    { 'bar).baz', 'HarmonizeVirtualText' },
+                    { 'bar).baz', 'HarmonizeVirtualTextBelow' },
                 })
                 local accent = vim.api.nvim_get_hl(0, { name = 'HarmonizeNextChunkBelow' })
+                local text = vim.api.nvim_get_hl(0, { name = 'HarmonizeVirtualTextBelow' })
                 local special = vim.api.nvim_get_hl(0, { name = 'Special' })
+                local pmenu = vim.api.nvim_get_hl(0, { name = 'Pmenu' })
                 helpers.expect_equal(accent.fg, special.fg)
+                helpers.expect_equal(accent.bg, pmenu.bg)
+                helpers.expect_equal(text.bg, pmenu.bg)
             end)
         end,
     },
@@ -115,6 +123,7 @@ return {
             with_display_scenario({
                 display = 'line',
                 display_options = {
+                    below = { background_highlight = '#234567' },
                     line = { next_chunk_highlight = '#123456' },
                 },
             }, {
@@ -134,6 +143,9 @@ return {
                 })
                 local accent = vim.api.nvim_get_hl(0, { name = 'HarmonizeNextChunkLine' })
                 helpers.expect_equal(accent.fg, 0x123456)
+                local below = app.view:text_highlight 'below'
+                local background = vim.api.nvim_get_hl(0, { name = below })
+                helpers.expect_equal(background.bg, 0x234567)
             end)
         end,
     },
@@ -161,7 +173,7 @@ return {
                 helpers.expect_equal(details.virt_text[1], { ' ↵', 'HarmonizeNextChunkBelow' })
                 helpers.expect_equal(details.virt_lines[1], {
                     { '.', 'HarmonizeNextChunkBelow' },
-                    { 'first line', 'HarmonizeVirtualText' },
+                    { 'first line', 'HarmonizeVirtualTextBelow' },
                 })
                 helpers.expect_equal(details.virt_text_pos, 'overlay')
                 helpers.expect_equal(vim.api.nvim_buf_line_count(bufnr), line_count)

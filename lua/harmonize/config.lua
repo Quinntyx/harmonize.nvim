@@ -195,12 +195,13 @@ local M = {
     -- 'line' overlays the current line, and 'chunk' shows what accept takes.
     ---@type 'below' | 'line' | 'chunk'
     display = 'below',
-    -- Options that apply only to each display mode. A next_chunk_highlight
-    -- value may be a highlight group name or a #RRGGBB foreground color.
-    -- Chunk mode needs no boundary accent because it only shows the next chunk.
+    -- Options that apply only to each display mode. Highlight values may be
+    -- highlight group names or direct #RRGGBB colors. Below mode uses the same
+    -- background as the completion popup. Chunk mode needs no extra styling.
     display_options = {
         below = {
             next_chunk_highlight = 'Special',
+            background_highlight = 'Pmenu',
         },
         line = {
             next_chunk_highlight = 'Special',

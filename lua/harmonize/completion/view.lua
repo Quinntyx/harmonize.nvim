@@ -5,6 +5,21 @@ local Session = require 'harmonize.completion.session'
 local api = vim.api
 local newline_indicator = ' ↵'
 
+---@param value unknown
+---@param component 'fg' | 'bg'
+---@return integer?
+local function resolve_color(value, component)
+    if type(value) ~= 'string' or value == '' then
+        return nil
+    end
+    local hex = value:match '^#(%x%x%x%x%x%x)$'
+    if hex then
+        return tonumber(hex, 16)
+    end
+    local ok, highlight = pcall(api.nvim_get_hl, 0, { name = value, link = false })
+    return ok and highlight[component] or nil
+end
+
 ---@class harmonize.GhostTextView
 local View = {}
 View.__index = View
@@ -16,7 +31,6 @@ function View.new(config)
     if vim.tbl_isempty(api.nvim_get_hl(0, { name = 'HarmonizeVirtualText' })) then
         api.nvim_set_hl(0, 'HarmonizeVirtualText', { link = 'Comment' })
     end
-    api.nvim_set_hl(0, 'HarmonizeVirtualTextBackground', { bg = 'NONE', default = true })
 
     return setmetatable({
         config = config,
@@ -60,25 +74,38 @@ function View:is_visible()
     return not not api.nvim_buf_get_extmark_by_id(0, self.ns_id, self.extmark_id, { details = false })[1]
 end
 
----@param mode 'below' | 'line'
+---@param mode 'below' | 'line' | 'chunk'
 ---@return string highlight_group
-function View:next_chunk_highlight(mode)
-    local options = self.config.display_options and self.config.display_options[mode]
-    local accent = options and options.next_chunk_highlight
-    if type(accent) ~= 'string' or accent == '' then
+function View:text_highlight(mode)
+    if mode ~= 'below' then
+        return 'HarmonizeVirtualText'
+    end
+
+    local options = self.config.display_options and self.config.display_options.below
+    local background = resolve_color(options and options.background_highlight, 'bg')
+    if not background then
         return 'HarmonizeVirtualText'
     end
 
     local attributes = api.nvim_get_hl(0, { name = 'HarmonizeVirtualText', link = false })
-    local hex = accent:match '^#(%x%x%x%x%x%x)$'
-    if hex then
-        attributes.fg = tonumber(hex, 16)
-    else
-        local ok, highlight = pcall(api.nvim_get_hl, 0, { name = accent, link = false })
-        if not ok or not highlight.fg then
-            return 'HarmonizeVirtualText'
-        end
-        attributes.fg = highlight.fg
+    attributes.bg = background
+    api.nvim_set_hl(0, 'HarmonizeVirtualTextBelow', attributes)
+    return 'HarmonizeVirtualTextBelow'
+end
+
+---@param mode 'below' | 'line'
+---@return string highlight_group
+function View:next_chunk_highlight(mode)
+    local options = self.config.display_options and self.config.display_options[mode]
+    local foreground = resolve_color(options and options.next_chunk_highlight, 'fg')
+    if not foreground then
+        return self:text_highlight(mode)
+    end
+
+    local attributes = api.nvim_get_hl(0, { name = 'HarmonizeVirtualText', link = false })
+    attributes.fg = foreground
+    if mode == 'below' then
+        attributes.bg = resolve_color(options and options.background_highlight, 'bg')
     end
 
     local group = mode == 'below' and 'HarmonizeNextChunkBelow' or 'HarmonizeNextChunkLine'
@@ -95,18 +122,19 @@ function View:display_chunks(text, mode, accepted_prefix)
         return { { text, 'HarmonizeVirtualText' } }
     end
 
+    local text_highlight = self:text_highlight(mode)
     accepted_prefix = accepted_prefix or Session.split_chunk(text)
     if accepted_prefix == '' or text:sub(1, #accepted_prefix) ~= accepted_prefix then
-        return { { text, 'HarmonizeVirtualText' } }
+        return { { text, text_highlight } }
     end
 
-    local highlight = self:next_chunk_highlight(mode)
-    if highlight == 'HarmonizeVirtualText' or #accepted_prefix == #text then
-        return { { text, highlight } }
+    local next_highlight = self:next_chunk_highlight(mode)
+    if next_highlight == text_highlight or #accepted_prefix == #text then
+        return { { text, next_highlight } }
     end
     return {
-        { accepted_prefix, highlight },
-        { text:sub(#accepted_prefix + 1), 'HarmonizeVirtualText' },
+        { accepted_prefix, next_highlight },
+        { text:sub(#accepted_prefix + 1), text_highlight },
     }
 end
 
@@ -165,7 +193,7 @@ function View:render_below(chunks)
     api.nvim_set_option_value('winblend', 0, { win = self.float_winid })
     api.nvim_set_option_value(
         'winhl',
-        'Normal:HarmonizeVirtualTextBackground,NormalNC:HarmonizeVirtualTextBackground',
+        'Normal:HarmonizeVirtualTextBelow,NormalNC:HarmonizeVirtualTextBelow',
         { win = self.float_winid }
     )
 end
@@ -237,7 +265,7 @@ function View:update(session)
         return
     end
 
-    local chunks = text == '' and { { ' ', 'HarmonizeVirtualText' } }
+    local chunks = text == '' and { { ' ', self:text_highlight(mode) } }
         or self:display_chunks(text, mode, accepted_prefix)
     if next_line then
         self:render_next_line(chunks, self:next_chunk_highlight(mode))

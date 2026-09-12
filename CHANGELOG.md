@@ -26,7 +26,10 @@
   while the rest of the suggestion keeps the normal ghost-text color. The
   `display_options.below.next_chunk_highlight` and
   `display_options.line.next_chunk_highlight` settings accept a highlight group
-  name or a direct `#RRGGBB` color. Chunk display needs no boundary accent.
+  name or a direct `#RRGGBB` color. Below previews use the `Pmenu` background by
+  default so they remain distinct from the code underneath. The
+  `display_options.below.background_highlight` setting accepts the same forms.
+  Chunk display needs no extra styling.
 - Harmonize remains active while another completion menu is visible by
   default. The menu draws above its preview, and
   `show_with_completion_menu = false` restores suppression.

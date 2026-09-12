@@ -16,7 +16,8 @@ the model generates tokens.
   identifier plus the special characters that follow it), so long completions
   arrive in reviewable steps without starting another request.
 - Clear acceptance boundary: only the text accepted by the next Tab uses the
-  theme's `Special` color by default. The rest stays fully readable.
+  theme's `Special` color by default. The rest stays fully readable, and below
+  previews use the completion menu's background to stand apart from code.
 - Completion-menu coexistence: LSP, nvim-cmp, and blink menus are drawn above
   the Harmonize preview while both remain available.
 - Token streaming: the completion is a character stream — the model appends
@@ -141,8 +142,11 @@ require('harmonize').setup {
     -- 'line' overlays the current line; 'chunk' shows the next accepted chunk.
     display = 'below',
     display_options = {
-        -- Use a highlight group name or a direct #RRGGBB foreground color.
-        below = { next_chunk_highlight = 'Special' },
+        -- Highlight values accept a group name or a direct #RRGGBB color.
+        below = {
+            next_chunk_highlight = 'Special',
+            background_highlight = 'Pmenu',
+        },
         line = { next_chunk_highlight = 'Special' },
         chunk = {},
     },
@@ -250,9 +254,11 @@ you have not taken yet, and it is redrawn on every token.
   'chunk'` shows exactly what the next accept completes.
 - `display_options` holds settings specific to each display mode. For `below`
   and `line`, `next_chunk_highlight` sets the color of only the text accepted by
-  the next Tab. It accepts a highlight group such as `'Special'` or a direct
-  color such as `'#ff8800'`. Chunk mode needs no boundary color because it only
-  shows the next accepted chunk.
+  the next Tab. Below mode's `background_highlight` separates the preview from
+  code and defaults to the completion menu's `Pmenu` background. These options
+  accept a highlight group such as `'Special'` or a direct color such as
+  `'#ff8800'`. Chunk mode needs no extra styling because it only shows the next
+  accepted chunk.
 - Typing the same characters keeps the remaining suggestion in sync; typing
   something different dismisses it and starts a fresh request.
 - When a chunk would cross a newline in the middle, it stops first — you never
@@ -297,10 +303,13 @@ default_config = {
     -- uses its actual next-line position and shifts following screen text.
     -- 'line' overlays the current line; 'chunk' shows the next accepted chunk.
     display = 'below',
-    -- A highlight group uses its foreground color; #RRGGBB is also accepted.
+    -- Highlight groups supply the relevant color; #RRGGBB is also accepted.
     -- Chunk mode has no options because it only shows the next accepted chunk.
     display_options = {
-        below = { next_chunk_highlight = 'Special' },
+        below = {
+            next_chunk_highlight = 'Special',
+            background_highlight = 'Pmenu',
+        },
         line = { next_chunk_highlight = 'Special' },
         chunk = {},
     },
