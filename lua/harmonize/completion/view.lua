@@ -3,7 +3,7 @@
 local Session = require 'harmonize.completion.session'
 
 local api = vim.api
-local newline_indicator = '↵'
+local newline_indicator = ' ↵'
 
 ---@class harmonize.GhostTextView
 local View = {}

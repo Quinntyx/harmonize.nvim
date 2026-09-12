@@ -158,7 +158,7 @@ return {
                     return chunk[1]
                 end, details.virt_lines[1]))
                 helpers.expect_equal(rendered, '.first line')
-                helpers.expect_equal(details.virt_text[1], { '↵', 'HarmonizeNextChunkBelow' })
+                helpers.expect_equal(details.virt_text[1], { ' ↵', 'HarmonizeNextChunkBelow' })
                 helpers.expect_equal(details.virt_lines[1], {
                     { '.', 'HarmonizeNextChunkBelow' },
                     { 'first line', 'HarmonizeVirtualText' },
@@ -186,7 +186,7 @@ return {
                 end, 1000, 'the newline indicator must be shown')
 
                 local details = extmark_details(app, bufnr)
-                helpers.expect_equal(details.virt_text[1], { '↵', 'HarmonizeVirtualText' })
+                helpers.expect_equal(details.virt_text[1], { ' ↵', 'HarmonizeVirtualText' })
                 helpers.expect_falsy(details.virt_lines, 'chunk display must show only the next accepted chunk')
             end)
         end,
