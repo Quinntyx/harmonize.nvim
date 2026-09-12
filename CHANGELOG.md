@@ -3,23 +3,44 @@
 ## Features
 
 - Virtual Text: The new `display` option picks what the ghost text shows.
-  `'line'` shows only the remainder of the current line of the completion:
-  when the completion starts with a newline, the next line is shown below the
-  cursor instead of inline to its right, matching where accepting it actually
-  puts it, and the rest stays cached so it can still be accepted line by
-  line. `'chunk'` shows exactly the next chunk the `accept` keymap completes.
+  The default `'below'` mode overlays same-line continuations beneath the cursor
+  without moving buffer lines. Newline-leading continuations use an in-place
+  virtual line so they appear where accepting them will put them and shift
+  following screen text down. A `↵` at the cursor indicates that the next
+  accepted chunk starts with a newline. `'line'` overlays the current line, and
+  `'chunk'` shows exactly what the `accept` keymap completes. Below-line floats
+  remain fixed at the cursor when clipped instead of shifting left.
 - Virtual Text: `accept` is now the accept action, taking the completion one
-  chunk at a time, where a chunk is the current identifier plus the special
-  characters that follow it (for example `foo.bar(a, b).baz(c)` is accepted
-  as `foo.` `bar(` `a, ` `b).` `baz(` `c)`). A chunk never crosses a newline
-  unless the newline is the first character of the completion, matching what
-  the line display shows; a run like `)\n.` is accepted as
-  `)` and then `\n.`. When the identifier of the current chunk has already
-  been typed, the special characters that follow it end that chunk: after
-  typing the `r` of `r#my_var_name`, the next chunk is `#` and only after
-  that `my_var_name`.
+  chunk at a time. Spaces and tabs terminate a chunk after the whitespace run,
+  so `data_ == other` is accepted as `data_ `, `== `, and `other`. A leading
+  newline is its own chunk with its indentation. Characters listed in
+  `chunk_options.allow_post_newline_chars`, such as `.`, may be included after
+  that indentation.
 - Virtual Text: A `toggle` keymap switches automatic completion on and off
   for the current buffer.
+- The next chunk accepted by Tab uses the theme's `Special` color by default,
+  while the rest of the suggestion keeps the normal ghost-text color. The
+  `display_options.below.next_chunk_highlight` and
+  `display_options.line.next_chunk_highlight` settings accept a highlight group
+  name or a direct `#RRGGBB` color. Below previews use the `Pmenu` background by
+  default so they remain distinct from the code underneath. The
+  `display_options.below.background_highlight` setting accepts the same forms.
+  Chunk display needs no extra styling.
+- Strict existing-text matching can reuse a predicted closing suffix or an
+  exact predicted next line instead of inserting a duplicate. Below mode shifts
+  the existing suffix to show its predicted position. Set
+  `match_existing_text = false` for insert-only behavior.
+- Below previews redraw after scrolling, acceptance keeps the old preview until
+  its cached tail is ready, and newline-only suggestions no longer add an empty
+  virtual line.
+- Cached completions extend in the background when fewer than two complete
+  newline-terminated lines remain. Extension requests capture context at the
+  predicted endpoint after applying strict existing-text matching, and streamed
+  extension text is appended without replacing the stable tail. Configure the
+  threshold or disable this through `extension_options`.
+- Harmonize remains active while another completion menu is visible by
+  default. The menu draws above its preview, and
+  `show_with_completion_menu = false` restores suppression.
 - Providers other than `llama_cpp` and `openai_fim_compatible` are
   untested; using one shows a warning on setup unless
   `allow_unsupported_providers = true`.
@@ -42,8 +63,11 @@
 - The virtual text options moved to the top level of the config:
   `virtualtext.trigger_on_typing` became `completion_trigger` (`'on_type'` or
   `'on_insert'`), `virtualtext.display_singleline` became `display`
-  (`'line'` or `'chunk'`), and the remaining virtual text options lost their
-  prefix.
+  (`'below'`, `'line'`, or `'chunk'`), and the remaining virtual text options
+  lost their prefix.
+- `chunk_fade` was replaced by mode-specific `display_options`. The `below` and
+  `line` modes can accent only the next accepted chunk; `chunk` needs no
+  boundary setting because it does not show the remaining completion.
 - The `quick_start` option became the `llama_cpp` provider plus the
   `auto_start` namespace. The provider talks to llama.cpp's native
   `/infill` endpoint, where the server constructs the FIM prompt with the
@@ -60,13 +84,13 @@
 - Accepting the whole completion and `accept_n_lines` are gone: `accept` now
   takes one chunk, and accepting a chunk counts as taking it from the stream,
   so the next chunk follows and repeated accepts never re-insert text.
-- The `show_on_completion_menu` option was removed: the ghost text is always
-  hidden while another completion menu is visible.
+- The `show_on_completion_menu` option was replaced by
+  `show_with_completion_menu`, which defaults to showing both completions.
 
 ## Defaults
 
 - Installing changes nothing by default: no keys are bound, no ghost text
-  is shown, and no provider is configured. Other defaults (single-line
+  is shown, and no provider is configured. Other defaults (below-line
   display, typing-only trigger, throttle and debounce) still apply. The
   README's install snippet turns everything on: the `llama_cpp` provider,
   Tab bound to accept chunks, ghost text in every filetype, and an
@@ -78,7 +102,7 @@
   longer `max_tokens` no longer means a longer wait for the first chunk.
   The completion is a character stream: the model keeps appending to the
   back up to the `max_tokens` cap while Tab or typing takes from the front,
-  and the remaining text is re-rendered on every token within the single-line
+  and the remaining text is re-rendered on every token within the one-line
   viewport rules.
 
 ## Removed
@@ -97,6 +121,23 @@
   removed. Virtual text is now the only completion frontend.
 - The lualine statusline component and the unused deprecation-notice module
   are gone.
+
+## Fixes
+
+- Changing the model with `change_model` no longer changes the configuration
+  defaults for the rest of the session: the next `setup()` still starts from
+  the documented defaults.
+- The ghost-text keymap descriptions now read `[harmonize]` instead of
+  `[harmonize.virtualtext]`.
+- An unknown `notify` level warns and falls back to `'warn'` instead of
+  failing the next time a message is logged.
+- Relative `.gguf` paths such as `models/qwen.gguf` are passed to llama.cpp as
+  local files instead of being mistaken for Hugging Face repository IDs.
+- `change_model` now reports that it cannot restart a llama.cpp server instead
+  of claiming that its model changed.
+- A context source that fails is logged at the debug level instead of failing
+  silently, and a failing teardown step no longer stops the other resources
+  from being released.
 
 # Version 0.10.0 (2026-07-31)
 

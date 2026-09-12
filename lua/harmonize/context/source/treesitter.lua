@@ -1,12 +1,13 @@
--- Treesitter-based extra context: imports and the headers of the
--- declarations enclosing the cursor. Parsing happens on buffer events, never
--- while building a completion request; snapshot() only reads cached text.
+--- Treesitter context source: imports and the headers of the declarations
+--- enclosing the cursor. Parsing happens on buffer events, never while
+--- building a completion request; snapshot() only reads cached text. State
+--- is per buffer, so a delayed refresh for one buffer can never replace the
+--- cached context of another.
 local api = vim.api
+local ContextItem = require 'harmonize.context.item'
 
-local M = {}
-
--- Node types whose header is sent as context, per language. Used when the
--- language has no harmonize query file.
+--- Node types whose header is sent as context, per language. Used when the
+--- language has no harmonize query file.
 local scope_node_types = {
     lua = { 'function_declaration', 'function_definition' },
     rust = {
@@ -23,19 +24,34 @@ local scope_node_types = {
 local max_header_chars = 240
 local debounce_ms = 250
 
-local state = {
-    bufnr = nil,
-    lang = nil,
-    tree = nil,
-    -- Rendered chunks: imports as one buffer-line range, scopes as one
-    -- single-line chunk per declaration header.
-    chunks = {},
-    -- Node ids of the current scopes, to skip re-rendering on cursor moves
-    -- that stay inside the same declarations.
-    scope_ids = nil,
-    cursor_row = nil,
-    debounce_timer = nil,
-}
+local function close_timer(timer)
+    if timer and not timer:is_closing() then
+        timer:stop()
+        timer:close()
+    end
+end
+
+---@class harmonize.TreeSitterSource
+local TreeSitterSource = {}
+TreeSitterSource.__index = TreeSitterSource
+
+---@param _options table context_sources.treesitter options
+function TreeSitterSource.new(_options)
+    return setmetatable({
+        -- bufnr -> { tree, lang, chunks, scope_ids, cursor_row, debounce_timer }
+        buffers = {},
+    }, TreeSitterSource)
+end
+
+---@param bufnr integer
+function TreeSitterSource:state(bufnr)
+    local state = self.buffers[bufnr]
+    if not state then
+        state = {}
+        self.buffers[bufnr] = state
+    end
+    return state
+end
 
 ---@return boolean true when the buffer is a normal file buffer
 local function is_normal_buffer(bufnr)
@@ -69,10 +85,6 @@ end
 --- whole node text capped when the grammar has no body field.
 ---@param node table treesitter node
 ---@param bufnr integer
---- Header of a declaration node: everything before its body starts, or the
---- whole node text capped when the grammar has no body field.
----@param node table treesitter node
----@param bufnr integer
 ---@return string
 local function scope_header(node, bufnr)
     local srow, scol = node:start()
@@ -81,10 +93,10 @@ local function scope_header(node, bufnr)
         local brow, bcol = body[1]:start()
         if brow > srow or bcol > scol then
             local header = text_between(bufnr, srow, scol, brow, bcol):gsub('%s+$', '')
-            -- Grains like Rust's function_item start their body at the opening
-            -- brace, which the exclusive cut drops; re-append the brace so the
-            -- header reads like the code in the file.
-            if not header:find('%{%s*$') then
+            -- Grammars like Rust's function_item start their body at the
+            -- opening brace, which the exclusive cut drops; re-append the
+            -- brace so the header reads like the code in the file.
+            if not header:find '%{%s*$' then
                 local line = api.nvim_buf_get_lines(bufnr, brow, brow + 1, true)[1] or ''
                 local pos = bcol + 1
                 while pos <= #line and (line:byte(pos) == 0x20 or line:byte(pos) == 0x09) do
@@ -100,43 +112,11 @@ local function scope_header(node, bufnr)
     return (vim.treesitter.get_node_text(node, bufnr):gsub('%s+$', ''):sub(1, max_header_chars))
 end
 
-local render_scopes ---@type fun(bufnr: integer)
-
-local function reset_state(bufnr)
-    state.bufnr = bufnr
-    state.lang = nil
-    state.tree = nil
-    state.chunks = {}
-    state.scope_ids = nil
-end
-
-local function parse(bufnr)
-    if not is_normal_buffer(bufnr) then
-        reset_state(nil)
-        return
-    end
-
-    local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
-    local parse_ok, trees
-    if ok then
-        parse_ok, trees = pcall(parser.parse, parser)
-    end
-    if not ok or not parse_ok or not trees or not trees[1] then
-        reset_state(bufnr)
-        return
-    end
-
-    state.bufnr = bufnr
-    state.lang = parser:lang()
-    state.tree = trees[1]
-    state.scope_ids = nil
-    render_scopes(bufnr)
-end
-
---- Re-render the cached chunks from the current tree and cursor row. Cheap:
---- no parsing.
-render_scopes = function(bufnr)
-    if not state.tree or state.bufnr ~= bufnr then
+--- Re-render the cached chunks for `bufnr` from its tree and cursor row.
+--- Cheap: no parsing.
+function TreeSitterSource:render_scopes(bufnr)
+    local state = self.buffers[bufnr]
+    if not state or not state.tree then
         return
     end
 
@@ -177,6 +157,7 @@ render_scopes = function(bufnr)
         end
         walk(state.tree:root())
     end
+
     table.sort(found, function(a, b)
         return a:start() < b:start()
     end)
@@ -196,13 +177,12 @@ render_scopes = function(bufnr)
     for _, node in ipairs(found) do
         local header = scope_header(node, bufnr)
         if header ~= '' then
-            chunks[#chunks + 1] = {
-                source = 'treesitter',
+            chunks[#chunks + 1] = ContextItem.new('treesitter', {
                 bufnr = bufnr,
                 start_row = node:start(),
                 end_row = node:start() + 1,
                 lines = { header },
-            }
+            })
         end
     end
 
@@ -220,77 +200,107 @@ render_scopes = function(bufnr)
             end
         end
         if first_row and #vim.tbl_keys(texts) > 0 then
-            chunks[#chunks + 1] = {
-                source = 'treesitter',
+            chunks[#chunks + 1] = ContextItem.new('treesitter', {
                 bufnr = bufnr,
                 start_row = first_row,
                 end_row = last_row + 1,
                 lines = api.nvim_buf_get_lines(bufnr, first_row, last_row + 1, true),
-            }
+            })
         end
     end
 
     state.chunks = chunks
 end
 
-function M.refresh(bufnr)
-    if not M.augroup then
+--- Parse the buffer and re-render its chunks.
+function TreeSitterSource:parse(bufnr)
+    local state = self:state(bufnr)
+
+    if not is_normal_buffer(bufnr) then
+        self.buffers[bufnr] = { chunks = {} }
         return
     end
-    if bufnr == api.nvim_get_current_buf() then
-        state.cursor_row = api.nvim_win_get_cursor(0)[1] - 1
+
+    local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
+    local parse_ok, trees
+    if ok and parser then
+        parse_ok, trees = pcall(parser.parse, parser)
     end
-    parse(bufnr)
-    render_scopes(bufnr)
+    if not ok or not parse_ok or not trees or not trees[1] then
+        state.chunks = {}
+        state.tree = nil
+        return
+    end
+
+    state.tree = trees[1]
+    state.lang = parser:lang()
+    state.scope_ids = nil
+    self:render_scopes(bufnr)
 end
 
-local function schedule_refresh(bufnr)
-    if state.debounce_timer then
-        state.debounce_timer:again()
-        return
+function TreeSitterSource:refresh(bufnr)
+    if bufnr == api.nvim_get_current_buf() then
+        local state = self:state(bufnr)
+        state.cursor_row = api.nvim_win_get_cursor(0)[1] - 1
     end
-    state.debounce_timer = vim.uv.new_timer()
-    state.debounce_timer:start(debounce_ms, 0, vim.schedule_wrap(function()
+
+    self:parse(bufnr)
+end
+
+---@param bufnr integer
+function TreeSitterSource:schedule_refresh(bufnr)
+    local state = self:state(bufnr)
+    close_timer(state.debounce_timer)
+
+    local timer = vim.uv.new_timer()
+    state.debounce_timer = timer
+    timer:start(debounce_ms, 0, vim.schedule_wrap(function()
+        if state.debounce_timer ~= timer then
+            return
+        end
         state.debounce_timer = nil
-        M.refresh(bufnr)
+        close_timer(timer)
+        self:refresh(bufnr)
     end))
 end
 
-function M.setup(augroup)
-    M.augroup = augroup
+---@param augroup integer
+function TreeSitterSource:start(augroup)
     local group = { group = augroup }
 
     api.nvim_create_autocmd({ 'BufEnter', 'BufWritePost', 'FileType' }, vim.tbl_extend('force', group, {
         callback = function(args)
-            M.refresh(args.buf)
+            self:refresh(args.buf)
         end,
         desc = 'harmonize treesitter context refresh',
     }))
 
     api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI' }, vim.tbl_extend('force', group, {
         callback = function(args)
-            schedule_refresh(args.buf)
+            self:schedule_refresh(args.buf)
         end,
         desc = 'harmonize treesitter context reparse',
     }))
 
     api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, vim.tbl_extend('force', group, {
         callback = function(args)
+            local state = self.buffers[args.buf]
+            if not state then
+                return
+            end
             state.cursor_row = api.nvim_win_get_cursor(0)[1] - 1
-            render_scopes(args.buf)
+            self:render_scopes(args.buf)
         end,
         desc = 'harmonize treesitter context scope update',
     }))
 
     api.nvim_create_autocmd('BufWipeout', vim.tbl_extend('force', group, {
         callback = function(args)
-            if state.bufnr == args.buf then
-                if state.debounce_timer then
-                    state.debounce_timer:stop()
-                    state.debounce_timer = nil
-                end
-                reset_state(nil)
+            local state = self.buffers[args.buf]
+            if state then
+                close_timer(state.debounce_timer)
             end
+            self.buffers[args.buf] = nil
         end,
         desc = 'harmonize treesitter context cleanup',
     }))
@@ -298,20 +308,24 @@ end
 
 --- Cached chunks for the buffer. Never parses.
 ---@param bufnr integer
----@return table[] chunks
-function M.snapshot(bufnr)
-    if state.bufnr ~= bufnr then
+---@return harmonize.ContextItem[]
+function TreeSitterSource:snapshot(bufnr)
+    local state = self.buffers[bufnr]
+    if not state then
         return {}
     end
-    return vim.deepcopy(state.chunks)
+    return vim.deepcopy(state.chunks or {})
 end
 
-function M.reset()
-    if state.debounce_timer then
-        state.debounce_timer:stop()
-        state.debounce_timer = nil
+function TreeSitterSource:reset()
+    for _, state in pairs(self.buffers) do
+        close_timer(state.debounce_timer)
     end
-    reset_state(nil)
+    self.buffers = {}
 end
 
-return M
+function TreeSitterSource:close()
+    self:reset()
+end
+
+return TreeSitterSource

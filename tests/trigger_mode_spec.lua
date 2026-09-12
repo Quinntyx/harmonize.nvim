@@ -1,27 +1,29 @@
 local helpers = require 'tests.helpers'
 
--- Runs a scenario against the real autocommands: the config is set up, the
--- plugin registers its events, and the scenario drives TextChangedI /
--- CursorMovedI manually while a stub backend counts requests.
+-- Runs a scenario against the real autocommands: the config is set up, a stub
+-- backend counts requests, and the scenario drives TextChangedI/CursorMovedI
+-- manually while the app's own bindings run.
 local function with_trigger_scenario(overrides, scenario)
-    helpers.setup_root_config(vim.tbl_deep_extend('force', {
-        provider = 'test_trigger',
-        debounce = 0,
-        throttle = 0,
-    }, overrides or {}))
-
     local calls = 0
     local answer = 'oobar'
 
-    package.loaded['harmonize.backends.test_trigger'] = {
-        complete = function(_, callback)
-            calls = calls + 1
-            callback { answer }
-        end,
-    }
-
-    local virtualtext = helpers.reload 'harmonize.virtualtext'
-    virtualtext.setup()
+    local app = helpers.new_app(vim.tbl_deep_extend('force', {
+        provider = 'test_trigger',
+        display = 'line',
+        debounce = 0,
+        throttle = 0,
+        extension_options = { enabled = false },
+    }, overrides or {}), {
+        backend = {
+            start = function() end,
+            close = function() end,
+            complete = function(_, _, callbacks)
+                calls = calls + 1
+                callbacks.on_finish { answer }
+            end,
+        },
+    })
+    app:start()
 
     local bufnr = helpers.create_buffer({ 'hel' }, { 1, 3 })
     vim.b.harmonize_virtual_text_auto_trigger = true
@@ -34,11 +36,12 @@ local function with_trigger_scenario(overrides, scenario)
     local ok, err = xpcall(function()
         scenario(bufnr, function()
             return calls
-        end)
+        end, app)
     end, debug.traceback)
 
     vim.fn.mode = original_mode
     helpers.delete_buffer(bufnr)
+    app:close()
     if not ok then
         error(err, 0)
     end
@@ -56,8 +59,21 @@ local function type_char(bufnr, c)
 end
 
 local function arrow_move(bufnr)
-    vim.api.nvim_win_set_cursor(0, { 1, vim.fn.col '.' + 1 })
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    vim.api.nvim_win_set_cursor(0, { cursor[1], math.max(0, cursor[2] - 1) })
     vim.api.nvim_exec_autocmds('CursorMovedI', { buffer = bufnr })
+end
+
+local function backspace(bufnr)
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    vim.api.nvim_buf_set_text(bufnr, cursor[1] - 1, cursor[2] - 1, cursor[1] - 1, cursor[2], {})
+    vim.api.nvim_win_set_cursor(0, { cursor[1], cursor[2] - 1 })
+    vim.api.nvim_exec_autocmds('TextChangedI', { buffer = bufnr })
+    vim.api.nvim_exec_autocmds('CursorMovedI', { buffer = bufnr })
+end
+
+local function extmark_shown(app, bufnr)
+    return vim.api.nvim_buf_get_extmark_by_id(bufnr, app.view.ns_id, 1, { details = true })[3] ~= nil
 end
 
 return {
@@ -91,7 +107,7 @@ return {
     {
         name = 'typing that continues the suggestion advances it without a new request',
         run = function()
-            with_trigger_scenario(nil, function(bufnr, get_calls)
+            with_trigger_scenario(nil, function(bufnr, get_calls, app)
                 type_char(bufnr, 'f')
                 helpers.wait_until(function()
                     return get_calls() == 1
@@ -102,8 +118,7 @@ return {
                 helpers.expect_equal(get_calls(), 1, 'matching typed text must not re-request')
 
                 -- The visible suggestion advanced from 'oobar' to 'obar'.
-                local vt = require 'harmonize.virtualtext'
-                local mark = vim.api.nvim_buf_get_extmark_by_id(bufnr, vt.ns_id, 1, { details = true })
+                local mark = vim.api.nvim_buf_get_extmark_by_id(bufnr, app.view.ns_id, 1, { details = true })
                 helpers.expect_truthy(mark[3], 'the advanced suggestion must still be shown')
                 helpers.expect_equal(mark[3].virt_text[1][1], 'obar')
             end)
@@ -112,22 +127,47 @@ return {
     {
         name = 'arrow keys dismiss a stale suggestion without requesting',
         run = function()
-            with_trigger_scenario(nil, function(bufnr, get_calls)
+            with_trigger_scenario(nil, function(bufnr, get_calls, app)
                 type_char(bufnr, 'f')
                 helpers.wait_until(function()
                     return get_calls() == 1
                 end, 1000, 'the typed character must request a completion')
 
-                local vt = require 'harmonize.virtualtext'
-                local shown = function()
-                    return vim.api.nvim_buf_get_extmark_by_id(bufnr, vt.ns_id, 1, { details = true })[3] ~= nil
-                end
-                helpers.expect_truthy(shown(), 'the suggestion must be visible')
+                helpers.expect_truthy(extmark_shown(app, bufnr), 'the suggestion must be visible')
 
                 arrow_move(bufnr)
                 vim.wait(200)
-                helpers.expect_falsy(shown(), 'arrow keys must dismiss the suggestion')
+                helpers.expect_falsy(extmark_shown(app, bufnr), 'arrow keys must dismiss the suggestion')
                 helpers.expect_equal(get_calls(), 1, 'arrow keys must not fire a new request')
+            end)
+        end,
+    },
+    {
+        name = 'completion continues while another completion menu is visible',
+        run = function()
+            with_trigger_scenario(nil, function(bufnr, get_calls, app)
+                app.view.menu_visible = function()
+                    return true
+                end
+                type_char(bufnr, 'x')
+                helpers.wait_until(function()
+                    return get_calls() == 1
+                end, 1000, 'the visible menu must not suppress harmonize')
+            end)
+        end,
+    },
+    {
+        name = 'completion-menu coexistence can be disabled',
+        run = function()
+            with_trigger_scenario({
+                show_with_completion_menu = false,
+            }, function(bufnr, get_calls, app)
+                app.view.menu_visible = function()
+                    return true
+                end
+                type_char(bufnr, 'x')
+                vim.wait(100)
+                helpers.expect_equal(get_calls(), 0, 'the opt-out must suppress harmonize while the menu is visible')
             end)
         end,
     },
@@ -141,6 +181,24 @@ return {
                 helpers.wait_until(function()
                     return get_calls() == 1
                 end, 1000, 'permissive mode must request on insert-enter')
+            end)
+        end,
+    },
+    {
+        name = 'permissive trigger does not request after backspace',
+        run = function()
+            with_trigger_scenario({
+                completion_trigger = 'on_insert',
+            }, function(bufnr, get_calls, app)
+                vim.api.nvim_exec_autocmds('InsertEnter', {})
+                helpers.wait_until(function()
+                    return get_calls() == 1 and extmark_shown(app, bufnr)
+                end, 1000, 'insert-enter must produce the initial suggestion')
+
+                backspace(bufnr)
+                vim.wait(100)
+                helpers.expect_equal(get_calls(), 1, 'backspace must not start another request')
+                helpers.expect_falsy(extmark_shown(app, bufnr), 'backspace must clear the stale suggestion')
             end)
         end,
     },

@@ -39,6 +39,26 @@ function M.setup_root_config(overrides)
     return root
 end
 
+--- The merged config table for a set of user overrides, without any module
+--- mocks. The refactored modules receive the config in constructors instead
+--- of reading require('harmonize').config.
+function M.merged_config(overrides)
+    M.ensure_runtime()
+    return vim.tbl_deep_extend('force', vim.deepcopy(require 'harmonize.config'), overrides or {})
+end
+
+--- Build a real App with a fresh set of modules. The second argument
+--- injects test doubles (backend, context, view, transport) into the
+--- composition root.
+---@param user_config table?
+---@param overrides table?
+function M.new_app(user_config, overrides)
+    M.ensure_runtime()
+    M.reset_harmonize_modules()
+    local App = require 'harmonize.app'
+    return App.new(user_config or {}, overrides)
+end
+
 function M.reload(module_name)
     package.loaded[module_name] = nil
     return require(module_name)

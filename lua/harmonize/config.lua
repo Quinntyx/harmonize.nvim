@@ -108,9 +108,9 @@ local n_completion_template = '8. Provide at most %d completion items.'
 local default_system_template = '{{{prompt}}}\n{{{guidelines}}}\n{{{n_completion_template}}}'
 
 local default_fim_prompt = function(context_before_cursor, _, _)
-    local utils = require 'harmonize.utils'
-    local language = utils.add_language_comment()
-    local tab = utils.add_tab_comment()
+    local comment = require 'harmonize.comment'
+    local language = comment.add_language_comment()
+    local tab = comment.add_tab_comment()
     context_before_cursor = language .. '\n' .. tab .. '\n' .. context_before_cursor
 
     return context_before_cursor
@@ -118,16 +118,6 @@ end
 
 local default_fim_suffix = function(_, context_after_cursor, _)
     return context_after_cursor
-end
-
-local function default_after_cursor_filter_length()
-    local config = require('harmonize').config
-    return (config.provider == 'codestral' or config.provider == 'openai_fim_compatible') and 0 or 15
-end
-
-local function default_before_cursor_filter_length()
-    local config = require('harmonize').config
-    return (config.provider == 'codestral' or config.provider == 'openai_fim_compatible') and 0 or 2
 end
 
 ---@class harmonize.ChatInputExtraInfo
@@ -149,12 +139,12 @@ end
 local default_chat_input = {
     template = '{{{language}}}\n{{{tab}}}\n<contextAfterCursor>\n{{{context_after_cursor}}}\n<contextBeforeCursor>\n{{{context_before_cursor}}}<cursorPosition>',
     language = function(_, _, _)
-        local utils = require 'harmonize.utils'
-        return utils.add_language_comment()
+        local comment = require 'harmonize.comment'
+        return comment.add_language_comment()
     end,
     tab = function(_, _, _)
-        local utils = require 'harmonize.utils'
-        return utils.add_tab_comment()
+        local comment = require 'harmonize.comment'
+        return comment.add_tab_comment()
     end,
     context_before_cursor = function(context_before_cursor, _, opts)
         if opts.is_incomplete_before then
@@ -200,18 +190,47 @@ local M = {
         -- toggle auto-completion on and off
         toggle = nil,
     },
-    -- What the ghost text shows. 'line' shows the rest of the current line,
-    -- or the line below the cursor when the completion starts with a
-    -- newline. 'chunk' shows only the next chunk, exactly what the
-    -- accept keymap will complete.
-    ---@type 'line' | 'chunk'
-    display = 'line',
+    -- What the ghost text shows. 'below' overlays same-line completions beneath
+    -- the cursor; newline-leading text uses its actual next-line position.
+    -- 'line' overlays the current line, and 'chunk' shows what accept takes.
+    ---@type 'below' | 'line' | 'chunk'
+    display = 'below',
+    -- Options that apply only to each display mode. Highlight values may be
+    -- highlight group names or direct #RRGGBB colors. Below mode uses the same
+    -- background as the completion popup. Chunk mode needs no extra styling.
+    display_options = {
+        below = {
+            next_chunk_highlight = 'Special',
+            background_highlight = 'Pmenu',
+        },
+        line = {
+            next_chunk_highlight = 'Special',
+        },
+        chunk = {},
+    },
+    -- Whitespace ends a chunk. A newline chunk includes its indentation and
+    -- may also include any characters listed here, such as '.' for chains.
+    chunk_options = {
+        allow_post_newline_chars = '',
+    },
+    -- Match a prediction against the complete text after the cursor. Matching
+    -- text is kept in place and the cursor advances over it when accepted.
+    match_existing_text = true,
+    -- Refill a cached completion in the background before acceptance exhausts
+    -- it. Only newline-terminated lines count as complete remaining lines.
+    extension_options = {
+        enabled = true,
+        minimum_remaining_lines = 2,
+    },
     -- When requests fire. 'on_type' requests only after a character was
-    -- typed: arrow-key moves and scrolling dismiss the ghost text without
-    -- requesting, and entering insert mode alone does not trigger either.
-    -- 'on_insert' is the old behavior: any pause in insert mode triggers.
+    -- typed: arrow-key moves dismiss ghost text without requesting, scrolling
+    -- re-anchors it, and entering insert mode alone does not trigger either.
+    -- 'on_insert' triggers after any pause in insert mode.
     ---@type 'on_type' | 'on_insert'
     completion_trigger = 'on_type',
+    -- Keep requesting and rendering while another completion menu is open.
+    -- The menu is drawn above harmonize's preview when they overlap.
+    show_with_completion_menu = true,
     -- No provider is configured by default: a blank config does nothing
     -- until you set this (see the README's install snippet). The provider
     -- options below still have defaults.
@@ -305,10 +324,13 @@ local M = {
     -- 20-character string that exactly matches the 20 characters following the
     -- cursor, the candidate will be truncated by those 20 characters before
     -- being delivered.
-    after_cursor_filter_length = default_after_cursor_filter_length,
+    -- Each provider falls back to its own default when this key is not set.
+    ---@type integer?
+    after_cursor_filter_length = nil,
     -- Similar to after_cursor_filter_length but trim the completion item from
-    -- prefix instead of suffix.
-    before_cursor_filter_length = default_before_cursor_filter_length,
+    -- prefix instead of suffix. Each provider falls back to its own default.
+    ---@type integer?
+    before_cursor_filter_length = nil,
     proxy = nil,
 }
 
@@ -468,7 +490,6 @@ M.provider_options = {
         get_text_fn = {},
     },
 }
-
 
 M.presets = {}
 

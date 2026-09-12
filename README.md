@@ -2,22 +2,30 @@
 
 Streaming AI tab completion for Neovim, rewritten from
 [minuet-ai.nvim](https://github.com/milanglacier/minuet-ai.nvim). Point it at
-an endpoint and Tab completes in chunks, with the ghost text revealed line by
-line as the model generates tokens.
+an endpoint and Tab completes in chunks, with a one-line preview updated as
+the model generates tokens.
 
 ## Features
 
-- Virtual text frontend: suggestions render as ghost text inline and refresh
-  on every streaming token. No completion-menu integration to configure.
-- Chunk-wise acceptance: Tab accepts one chunk at a time (the current
-  identifier plus the special characters that follow it), so long completions
-  arrive in reviewable steps.
-- Single-line display: the ghost shows the rest of the current line (or the
-  line below when the completion starts with a newline); the rest stays
-  cached for further acceptance.
+- Stable below-line preview: same-line continuations overlay the screen line
+  below the cursor without moving buffer lines. When the completion starts a
+  new line, a `↵` at the cursor marks what Tab will insert, the next line is
+  shown in its actual position, and following screen text moves down. Long
+  lines are clipped at the window edge instead of wrapping.
+- Chunk-wise acceptance: Tab accepts one cached chunk at a time. Whitespace and
+  newlines provide clear boundaries, so long completions arrive in reviewable
+  steps without starting another request.
+- Clear acceptance boundary: only the text accepted by the next Tab uses the
+  theme's `Special` color by default. The rest stays fully readable, and below
+  previews use the completion menu's background to stand apart from code.
+- Completion-menu coexistence: LSP, nvim-cmp, and blink menus are drawn above
+  the Harmonize preview while both remain available.
 - Token streaming: the completion is a character stream — the model appends
-  to the back while typing and Tab take from the front, so the first chunk
+  to the back while typing and Tab takes from the front, so the first chunk
   appears quickly even on slow local models.
+- Background extension: when fewer than two newline-terminated lines remain,
+  Harmonize asks the model to continue from the predicted endpoint and appends
+  the result without replacing the stable cached text.
 - Typing sync: when typed text matches the start of the suggestion, the
   suggestion advances instead of being discarded and re-requested.
 - `llama_cpp` provider for llama.cpp's native `/infill` endpoint, with
@@ -132,13 +140,35 @@ default (and a blank config does nothing at all).
 require('harmonize').setup {
     provider = 'llama_cpp',
 
-    -- What the ghost text shows: 'line' shows the rest of the current line
-    -- (or the line below when the completion starts with a newline);
-    -- 'chunk' shows exactly the next chunk Tab will accept.
-    display = 'line',
+    -- 'below' overlays same-line text beneath the cursor; newline-leading text
+    -- uses its actual next-line position and shifts following screen text.
+    -- 'line' overlays the current line; 'chunk' shows the next accepted chunk.
+    display = 'below',
+    display_options = {
+        -- Highlight values accept a group name or a direct #RRGGBB color.
+        below = {
+            next_chunk_highlight = 'Special',
+            background_highlight = 'Pmenu',
+        },
+        line = { next_chunk_highlight = 'Special' },
+        chunk = {},
+    },
+    chunk_options = {
+        -- Use '.' here to accept a method-chain dot with a newline.
+        allow_post_newline_chars = '',
+    },
+    -- Reuse matching text after the cursor instead of inserting duplicates.
+    match_existing_text = true,
+    extension_options = {
+        enabled = true,
+        -- Only newline-terminated lines count as complete.
+        minimum_remaining_lines = 2,
+    },
     -- When requests fire: 'on_type' only after a character is typed,
-    -- 'on_insert' on any pause in insert mode.
+    -- 'on_insert' on any pause except after backspace.
     completion_trigger = 'on_type',
+    -- Keep Harmonize visible below another completion menu.
+    show_with_completion_menu = true,
     -- Filetypes where auto-completion fires; use { '*' } for all. Manual
     -- completion (keymap.trigger) works everywhere either way.
     auto_trigger_ft = { 'lua', 'python', 'rust' },
@@ -220,27 +250,52 @@ The completion is a character stream: the model keeps appending tokens to the
 back while you take from the front. The visible suggestion is always the part
 you have not taken yet, and it is redrawn on every token.
 
-- **Tab** (`accept`) accepts one chunk. A chunk walk consumes
-  alphanumeric characters and underscores; the first special character
-  switches to terminating mode, in which the next alphanumeric character ends
-  the chunk. A newline ends the chunk unless it is the first character (the
-  case in which the line below is shown). So `b)\n.c()` is accepted as `b)`,
-  then `\n.`, then `c()`.
-- By default, requests fire only after you actually type a character:
-  arrow-key moves and scrolling only dismiss a stale suggestion, and entering
-  insert mode alone does not trigger a request. Set
-  `completion_trigger = 'on_insert'` for the old behavior.
-- `display = 'chunk'` shows only the next chunk in the ghost text — exactly
-  what Tab will complete — instead of the rest of the current line.
+- **Tab** (`accept`) accepts one chunk. A chunk walk consumes alphanumeric
+  characters and underscores; punctuation ends before the next identifier.
+  Spaces and tabs end the chunk after the complete whitespace run, so
+  `data_ == other` is accepted as `data_ `, then `== `, then `other`.
+  A newline chunk contains only the newline and its indentation by default.
+  Set `chunk_options.allow_post_newline_chars = '.'` to accept a method-chain
+  dot with the newline.
+- By default, requests fire only after you actually type a character. Arrow-key
+  moves dismiss a stale suggestion, scrolling re-anchors a visible below-line
+  preview, and entering insert mode alone does not trigger a request. Set
+  `completion_trigger = 'on_insert'` to request on any pause instead.
+- `display = 'below'` overlays same-line completions beneath the cursor without
+  adding a buffer line. A newline-leading completion uses an in-place virtual
+  line so it appears where accepting it will put it and shifts following screen
+  text down. A `↵` at the cursor indicates that the next chunk starts with a
+  newline. A newline-only suggestion does not add an empty virtual line.
+  `display = 'line'` overlays the current line, and `display =
+  'chunk'` shows exactly what the next accept completes.
+- `display_options` holds settings specific to each display mode. For `below`
+  and `line`, `next_chunk_highlight` sets the color of only the text accepted by
+  the next Tab. Below mode's `background_highlight` separates the preview from
+  code and defaults to the completion menu's `Pmenu` background. These options
+  accept a highlight group such as `'Special'` or a direct color such as
+  `'#ff8800'`. Chunk mode needs no extra styling because it only shows the next
+  accepted chunk.
+- With `match_existing_text = true`, a prediction is matched only when its line
+  ends with all existing text after the cursor. The preview displaces that text
+  to show its final position, and acceptance moves over matching characters
+  instead of duplicating them. A newline-leading prediction similarly reuses
+  the next buffer line only when that whole line matches exactly.
 - Typing the same characters keeps the remaining suggestion in sync; typing
   something different dismisses it and starts a fresh request.
-- When a chunk would cross a newline in the middle, it stops first — you never
-  accept text the view did not show.
+- Acceptance keeps the existing preview visible until its cached tail is
+  redrawn, avoiding a blank frame on slower displays.
+- `extension_options.minimum_remaining_lines` controls when the cached
+  completion is refilled. With the default `2`, fewer than two
+  newline-terminated remaining lines starts one background request. Harmonize
+  builds that request as if the complete cached tail had already been accepted,
+  including matched suffixes and next lines, then appends streamed continuation
+  text to whatever remains. Set `extension_options.enabled = false` to disable
+  this.
 - `accept_line` takes the whole visible line.
 - A `toggle` keymap switches automatic completion on and off (same as
   `:Harmonize virtualtext toggle`).
-- `action.trigger` requests a completion on demand — useful in `'on_type'`
-  mode after navigating somewhere; bind it in `keymap` if you want a key.
+- The `trigger` keymap requests a completion on demand — useful in `'on_type'`
+  mode after navigating somewhere.
 
 ### Keymaps
 
@@ -272,13 +327,40 @@ default_config = {
         -- toggle auto-completion on and off
         toggle = nil,
     },
-    -- What the ghost text shows: 'line' shows the rest of the current line
-    -- shows only the next chunk, exactly what the accept keymap will
-    -- complete.
-    display = 'line',
+    -- 'below' overlays same-line text beneath the cursor; newline-leading text
+    -- uses its actual next-line position and shifts following screen text.
+    -- 'line' overlays the current line; 'chunk' shows the next accepted chunk.
+    display = 'below',
+    -- Highlight groups supply the relevant color; #RRGGBB is also accepted.
+    -- Chunk mode has no options because it only shows the next accepted chunk.
+    display_options = {
+        below = {
+            next_chunk_highlight = 'Special',
+            background_highlight = 'Pmenu',
+        },
+        line = { next_chunk_highlight = 'Special' },
+        chunk = {},
+    },
+    -- Newlines accept indentation only. Add characters such as '.' when they
+    -- should be accepted in the same chunk as a leading newline.
+    chunk_options = {
+        allow_post_newline_chars = '',
+    },
+    -- Skip matching suffixes and exact matching next lines instead of inserting
+    -- duplicate closing characters. Set false for insert-only behavior.
+    match_existing_text = true,
+    -- Refill from the predicted endpoint when fewer than this many complete
+    -- newline-terminated lines remain.
+    extension_options = {
+        enabled = true,
+        minimum_remaining_lines = 2,
+    },
     -- When requests fire: 'on_type' only after a character was typed,
-    -- 'on_insert' on any pause in insert mode.
+    -- 'on_insert' on any pause in insert mode except after backspace.
     completion_trigger = 'on_type',
+    -- Keep harmonize active while another completion menu is open. The menu
+    -- is drawn above the ghost text when they overlap.
+    show_with_completion_menu = true,
     -- No provider by default: a blank config does nothing until you set
     -- this. The provider options below still have defaults.
     provider = nil,
@@ -314,13 +396,15 @@ default_config = {
     -- Request timeout in seconds. With streaming, a timeout cut keeps the
     -- partial text generated so far.
     request_timeout = 3,
-    stream = true,
     curl_cmd = 'curl',
     curl_extra_args = {},
     -- Trim completion prefixes/suffixes that duplicate the surrounding text.
-    -- 0 for FIM models (they emit intentional whitespace); 15 / 2 for chat.
-    after_cursor_filter_length = function() end,
-    before_cursor_filter_length = function() end,
+    -- Left unset, each provider picks its own numbers (before / after): 0 / 0
+    -- for openai_fim_compatible, whose models emit intentional whitespace, and
+    -- 2 / 15 for llama_cpp and the chat providers. Either value may be a
+    -- function returning the number.
+    after_cursor_filter_length = nil,
+    before_cursor_filter_length = nil,
     proxy = nil,
     -- A list of predicates; auto-completion fires only while all return true.
     enable_predicates = {},
@@ -605,7 +689,8 @@ provider uses llama.cpp's native `/infill` endpoint.
 - `Harmonize change_provider <name>` — switch the active provider.
 - `Harmonize change_model [provider:model]` — with no argument, opens
   `vim.ui.select` over the models in `modelcard`; otherwise sets
-  `provider:model` directly.
+  `provider:model` directly. This cannot switch the model loaded by a
+  llama.cpp server; restart that server with the desired model instead.
 - `Harmonize change_preset <preset>` — merge a preset defined at setup into
   the current config.
 - `Harmonize virtualtext enable|disable|toggle` — control automatic ghost-text
@@ -613,14 +698,23 @@ provider uses llama.cpp's native `/infill` endpoint.
 
 ## API
 
+`require('harmonize').is_visible()` reports whether a preview is shown, and
+`require('harmonize').accept()` accepts its next chunk. These are useful when a
+completion plugin owns Tab and should get the first chance to handle it.
+
+### Actions
+
+Bind the editor actions through the `keymap` table at setup:
+
 ```lua
 {
-    require('harmonize.virtualtext').action.accept, -- accept one chunk
-    require('harmonize.virtualtext').action.accept_line,
-    require('harmonize.virtualtext').action.dismiss,
-    require('harmonize.virtualtext').action.trigger, -- manually request a completion
-    require('harmonize.virtualtext').action.toggle_auto_trigger, -- toggle auto-completion
-    require('harmonize.virtualtext').action.is_visible,
+    keymap = {
+        accept = '<Tab>', -- accept one chunk
+        accept_line = '<S-Tab>', -- accept the visible line
+        dismiss = '<C-e>', -- dismiss the ghost text
+        trigger = '<M-y>', -- manually request a completion
+        toggle = '<M-t>', -- toggle auto-completion
+    },
 }
 ```
 
