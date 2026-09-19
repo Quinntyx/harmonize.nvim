@@ -1,32 +1,53 @@
 local helpers = require 'tests.helpers'
 
+-- A transport double that captures the request: the body goes through a temp
+-- file referenced as `-d @<file>` exactly like the real transport, so the
+-- backend's handler wiring is exercised.
 local function with_mocked_job(run)
-    local common = require 'harmonize.backends.common'
-    local original = common.start_job
     local captured
 
-    common.start_job = function(_, args, value)
-        captured = { args = args, handlers = value }
-        return {}
-    end
+    local deps = {
+        notify = require 'harmonize.notify',
+        events = require 'harmonize.events',
+        secret = require 'harmonize.secret',
+        transport = {
+            post = function(_, endpoint, _headers, body, handlers)
+                local data_file = vim.fn.tempname()
+                vim.fn.writefile({ vim.json.encode(body) }, data_file)
+                captured = {
+                    args = { '-d', '@' .. data_file, endpoint },
+                    handlers = handlers,
+                    data_file = data_file,
+                }
+                return { cancel = function() end }
+            end,
+        },
+    }
 
     local ok, err = xpcall(function()
-        run(function()
-            return captured
-        end)
+        run({
+            backend = function(overrides)
+                local config = helpers.merged_config(vim.tbl_deep_extend('force', {
+                    notify = false,
+                    before_cursor_filter_length = 0,
+                    after_cursor_filter_length = 0,
+                }, overrides or {}))
+                return require('harmonize.backend.llama_cpp').new('llama_cpp', config, deps)
+            end,
+            get = function()
+                return captured
+            end,
+        })
     end, debug.traceback)
 
-    common.start_job = original
+    if captured and captured.data_file and vim.uv.fs_stat(captured.data_file) then
+        vim.uv.fs_unlink(captured.data_file)
+    end
 
     if not ok then
         error(err, 0)
     end
 end
-
-local context = {
-    lines_before = 'function add(a, b) {',
-    lines_after = '\n}',
-}
 
 ---The request body goes through a temp file referenced as `-d @<file>`.
 local function request_body(args)
@@ -39,27 +60,30 @@ local function request_body(args)
     error('the request body must be passed to curl')
 end
 
+local context = {
+    lines_before = 'function add(a, b) {',
+    lines_after = '\n}',
+}
+
 return {
     {
         name = 'llama_cpp streaming sends input_prefix and input_suffix to /infill and accumulates the stream',
         run = function()
-            helpers.setup_root_config {
-                before_cursor_filter_length = 0,
-                after_cursor_filter_length = 0,
-            }
-
-            with_mocked_job(function(get)
-                local backend = helpers.reload 'harmonize.backends.llama_cpp'
+            with_mocked_job(function(ctx)
+                local backend = ctx.backend()
                 local updates = {}
                 local result
 
-                backend.complete(context, function(items)
-                    result = items
-                end, function(text)
-                    table.insert(updates, text)
-                end)
+                backend:complete(context, {
+                    on_finish = function(items)
+                        result = items
+                    end,
+                    on_update = function(text)
+                        table.insert(updates, text)
+                    end,
+                })
 
-                local captured = get()
+                local captured = ctx.get()
                 local body = request_body(captured.args)
                 helpers.expect_equal(body.input_prefix, context.lines_before)
                 helpers.expect_equal(body.input_suffix, context.lines_after)
@@ -83,7 +107,7 @@ return {
                 helpers.expect_truthy(handlers.on_stdout)
                 handlers.on_stdout(nil, 'data: {"content":"turn","stop":false}\r\n')
                 handlers.on_stdout(nil, 'data: {"content":" a + b;","stop":true}\r\n')
-                handlers.on_exit({}, { code = 0 })
+                handlers.on_exit({ code = 0 }, captured.data_file)
 
                 helpers.expect_equal(updates, { 'turn', 'turn a + b;' })
                 helpers.expect_equal(result, { 'turn a + b;' })
@@ -93,62 +117,54 @@ return {
     {
         name = 'llama_cpp non-streaming reads the content field from the response',
         run = function()
-            helpers.setup_root_config {
-                before_cursor_filter_length = 0,
-                after_cursor_filter_length = 0,
-                provider_options = {
-                    llama_cpp = { stream = false },
-                },
-            }
-
-            with_mocked_job(function(get)
-                local backend = helpers.reload 'harmonize.backends.llama_cpp'
+            with_mocked_job(function(ctx)
+                local backend = ctx.backend({
+                    provider_options = {
+                        llama_cpp = { stream = false },
+                    },
+                })
                 local result
 
-                backend.complete(context, function(items)
-                    result = items
-                end)
-
-                local handlers = get().handlers
-                helpers.expect_falsy(handlers.on_stdout)
-                handlers.on_exit({}, {
-                    code = 0,
-                    stdout = '{"content":"plain"}',
+                backend:complete(context, {
+                    on_finish = function(items)
+                        result = items
+                    end,
                 })
+
+                local handlers = ctx.get().handlers
+                helpers.expect_falsy(handlers.on_stdout)
+                handlers.on_exit({ code = 0, stdout = '{"content":"plain"}' }, ctx.get().data_file)
 
                 helpers.expect_equal(result, { 'plain' })
             end)
         end,
     },
     {
-        name = 'llama_cpp forwards context.input_extra as input_extra',
+        name = 'llama_cpp forwards the captured extra context as input_extra',
         run = function()
-            helpers.setup_root_config {
-                before_cursor_filter_length = 0,
-                after_cursor_filter_length = 0,
-            }
-
             local context_with_extra = vim.deepcopy(context)
-            context_with_extra.input_extra = {
+            context_with_extra.extra = {
                 { filename = 'src/utils.lua', text = 'local function helper() end' },
             }
 
-            with_mocked_job(function(get)
-                local backend = helpers.reload 'harmonize.backends.llama_cpp'
+            with_mocked_job(function(ctx)
+                local backend = ctx.backend()
                 local result
 
-                backend.complete(context_with_extra, function(items)
-                    result = items
-                end)
+                backend:complete(context_with_extra, {
+                    on_finish = function(items)
+                        result = items
+                    end,
+                })
 
-                local body = request_body(get().args)
+                local body = request_body(ctx.get().args)
                 helpers.expect_equal(body.input_extra, {
                     { filename = 'src/utils.lua', text = 'local function helper() end' },
                 })
 
-                local handlers = get().handlers
+                local handlers = ctx.get().handlers
                 handlers.on_stdout(nil, 'data: {"content":"ok","stop":true}\r\n')
-                handlers.on_exit({}, { code = 0 })
+                handlers.on_exit({ code = 0 }, ctx.get().data_file)
                 helpers.expect_equal(result, { 'ok' })
             end)
         end,
@@ -156,17 +172,14 @@ return {
     {
         name = 'llama_cpp omits input_extra when the context has none',
         run = function()
-            helpers.setup_root_config {
-                before_cursor_filter_length = 0,
-                after_cursor_filter_length = 0,
-            }
+            with_mocked_job(function(ctx)
+                local backend = ctx.backend()
 
-            with_mocked_job(function(get)
-                local backend = helpers.reload 'harmonize.backends.llama_cpp'
+                backend:complete(context, {
+                    on_finish = function() end,
+                })
 
-                backend.complete(context, function() end)
-
-                local body = request_body(get().args)
+                local body = request_body(ctx.get().args)
                 helpers.expect_falsy(body.input_extra)
             end)
         end,

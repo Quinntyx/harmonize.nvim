@@ -1,4 +1,5 @@
 local helpers = require 'tests.helpers'
+local JumplistSource = require 'harmonize.context.source.jumplist'
 
 local function named_buffer(name, lines)
     local bufnr = helpers.create_buffer(lines or { 'a', 'b', 'c' })
@@ -6,14 +7,15 @@ local function named_buffer(name, lines)
     return bufnr
 end
 
+local function make_source()
+    return JumplistSource.new(helpers.merged_config().context_sources.jumplist)
+end
+
 return {
     {
         name = 'jumplist.select_jumps picks the most recent distinct jumps, oldest first',
         run = function()
-            helpers.setup_root_config { provider = 'llama_cpp' }
-
-            local jumplist = helpers.reload 'harmonize.context.jumplist'
-            jumplist.reset()
+            local jumplist = make_source()
 
             local buf1 = named_buffer '/proj/one.lua'
             local buf2 = named_buffer '/proj/two.lua'
@@ -26,7 +28,7 @@ return {
                 { bufnr = buf2, lnum = 25 }, -- newest
             }
 
-            local selected = jumplist.select_jumps(list, #list, { bufnr = buf3, lnum = 30 }, {
+            local selected = jumplist:select_jumps(list, #list, { bufnr = buf3, lnum = 30 }, {
                 max_jumps = 4,
                 project_only = false,
                 root = '/proj',
@@ -46,22 +48,21 @@ return {
     {
         name = 'jumplist.select_jumps respects max_jumps and drops out-of-project files',
         run = function()
-            helpers.setup_root_config { provider = 'llama_cpp' }
-
-            local jumplist = helpers.reload 'harmonize.context.jumplist'
-            jumplist.reset()
+            local jumplist = make_source()
 
             local inside1 = named_buffer '/proj/one.lua'
             local outside = named_buffer '/elsewhere/two.lua'
+            local sibling = named_buffer '/proj-other/two.lua'
             local inside2 = named_buffer '/proj/three.lua'
 
             local list = {
                 { bufnr = inside1, lnum = 5 },
                 { bufnr = outside, lnum = 6 },
+                { bufnr = sibling, lnum = 6 },
                 { bufnr = inside2, lnum = 7 },
             }
 
-            local selected = jumplist.select_jumps(list, #list, { bufnr = inside2, lnum = 7 }, {
+            local selected = jumplist:select_jumps(list, #list, { bufnr = inside2, lnum = 7 }, {
                 max_jumps = 2,
                 project_only = true,
                 root = '/proj',
@@ -73,19 +74,17 @@ return {
 
             helpers.delete_buffer(inside1)
             helpers.delete_buffer(outside)
+            helpers.delete_buffer(sibling)
             helpers.delete_buffer(inside2)
         end,
     },
     {
         name = 'jumplist.snapshot builds a chunk around the most recent jump',
         run = function()
-            helpers.setup_root_config { provider = 'llama_cpp' }
-
-            local jumplist = helpers.reload 'harmonize.context.jumplist'
-            jumplist.reset()
+            local jumplist = make_source()
 
             local augroup = vim.api.nvim_create_augroup('harmonize-test-jumps', { clear = true })
-            jumplist.setup(augroup)
+            jumplist:start(augroup)
 
             local path = vim.fn.getcwd() .. '/test_jumplist_fixture.lua'
             local bufnr = helpers.create_buffer({ 'l0', 'l1', 'l2', 'l3', 'l4' })
@@ -98,8 +97,8 @@ return {
             vim.cmd 'normal! G'
             vim.cmd 'normal! gg'
 
-            jumplist.refresh(bufnr)
-            local chunks = jumplist.snapshot()
+            jumplist:refresh(bufnr)
+            local chunks = jumplist:snapshot()
 
             helpers.expect_equal(#chunks, 1)
             helpers.expect_equal(chunks[1].bufnr, bufnr)
@@ -109,8 +108,8 @@ return {
             helpers.expect_equal(chunks[1].filename, path)
 
             -- A second refresh with an unchanged jumplist keeps the cache.
-            jumplist.refresh(bufnr)
-            helpers.expect_equal(jumplist.snapshot(), chunks)
+            jumplist:refresh(bufnr)
+            helpers.expect_equal(jumplist:snapshot(), chunks)
 
             helpers.delete_buffer(bufnr)
         end,

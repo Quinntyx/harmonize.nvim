@@ -1,15 +1,13 @@
 local helpers = require 'tests.helpers'
+local TreeSitterSource = require 'harmonize.context.source.treesitter'
 
 local function refresh(bufnr)
-    helpers.setup_root_config { provider = 'llama_cpp' }
-
-    local treesitter = helpers.reload 'harmonize.context.treesitter'
-    treesitter.reset()
+    local treesitter = TreeSitterSource.new(nil)
 
     local augroup = vim.api.nvim_create_augroup('harmonize-test-treesitter', { clear = true })
-    treesitter.setup(augroup)
+    treesitter:start(augroup)
     vim.api.nvim_set_current_buf(bufnr)
-    treesitter.refresh(bufnr)
+    treesitter:refresh(bufnr)
     return treesitter
 end
 
@@ -37,7 +35,7 @@ return {
             -- Put the cursor inside the function so it counts as enclosing.
             vim.api.nvim_win_set_cursor(0, { 5, 0 })
             local treesitter = refresh(bufnr)
-            local chunks = treesitter.snapshot(bufnr)
+            local chunks = treesitter:snapshot(bufnr)
 
             local texts = {}
             for _, c in ipairs(chunks) do
@@ -60,7 +58,7 @@ return {
         end,
     },
     {
-        name = 'treesitter snapshot returns nothing without a tracked buffer',
+        name = 'treesitter state stays isolated per buffer',
         run = function()
             if not parser_available then
                 return -- skip: no lua parser in this environment
@@ -70,11 +68,12 @@ return {
             vim.bo[bufnr].buftype = ''
             vim.bo[bufnr].ft = 'lua'
             local treesitter = refresh(bufnr)
+            helpers.expect_equal(#treesitter:snapshot(bufnr), 0)
 
-            -- Another buffer has no cached state.
+            -- Another buffer has no cached state of its own.
             local other = helpers.create_buffer({ 'local y = 2' })
-            vim.bo[bufnr].buftype = ''
-            helpers.expect_equal(treesitter.snapshot(other), {})
+            vim.bo[other].buftype = ''
+            helpers.expect_equal(treesitter:snapshot(other), {})
 
             helpers.delete_buffer(bufnr)
             helpers.delete_buffer(other)
@@ -102,14 +101,34 @@ return {
             local treesitter = refresh(bufnr)
 
             local texts = {}
-            for _, c in ipairs(treesitter.snapshot(bufnr)) do
+            for _, c in ipairs(treesitter:snapshot(bufnr)) do
                 texts[#texts + 1] = table.concat(c.lines, '\n')
             end
 
             helpers.expect_truthy(vim.tbl_contains(texts, 'impl Config {'), 'impl header must keep its brace')
-            helpers.expect_truthy(vim.tbl_contains(texts, 'pub fn from_env(&self, x: u32) -> u32 {'), 'fn header must keep its brace')
+            helpers.expect_truthy(
+                vim.tbl_contains(texts, 'pub fn from_env(&self, x: u32) -> u32 {'),
+                'fn header must keep its brace'
+            )
 
             helpers.delete_buffer(bufnr)
+        end,
+    },
+    {
+        name = 'treesitter debounce replaces and closes pending timers',
+        run = function()
+            local Source = helpers.reload 'harmonize.context.source.treesitter'
+            local source = Source.new {}
+
+            source:schedule_refresh(1)
+            local first = source:state(1).debounce_timer
+            source:schedule_refresh(1)
+            local second = source:state(1).debounce_timer
+
+            helpers.expect_truthy(first ~= second)
+            helpers.expect_truthy(first:is_closing(), 'the replaced timer must be closed')
+            source:close()
+            helpers.expect_truthy(second:is_closing(), 'close must close the pending timer')
         end,
     },
 }

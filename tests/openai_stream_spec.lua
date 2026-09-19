@@ -1,27 +1,5 @@
 local helpers = require 'tests.helpers'
 
-local function with_mocked_job(run)
-    local common = require 'harmonize.backends.common'
-    local original = common.start_job
-    local handlers
-
-    common.start_job = function(_, _, value)
-        handlers = value
-        return {}
-    end
-
-    local ok, err = xpcall(function()
-        run(function()
-            return handlers
-        end)
-    end, debug.traceback)
-    common.start_job = original
-
-    if not ok then
-        error(err, 0)
-    end
-end
-
 local function options(stream)
     return {
         model = 'test-model',
@@ -40,6 +18,55 @@ local function options(stream)
     }
 end
 
+local function with_mocked_job(run)
+    local handlers
+    local data_file
+
+    local deps = {
+        notify = require 'harmonize.notify',
+        events = require 'harmonize.events',
+        secret = require 'harmonize.secret',
+        transport = {
+            post = function(_, _endpoint, _headers, body, value)
+                handlers = value
+                data_file = vim.fn.tempname()
+                vim.fn.writefile({ vim.json.encode(body) }, data_file)
+                return { cancel = function() end }
+            end,
+        },
+    }
+
+    local ok, err = xpcall(function()
+        run({
+            backend = function(stream)
+                local config = helpers.merged_config {
+                    notify = false,
+                    before_cursor_filter_length = 0,
+                    after_cursor_filter_length = 0,
+                    provider_options = {
+                        openai_fim_compatible = options(stream),
+                    },
+                }
+                return require('harmonize.backend.openai_fim').new('openai_fim_compatible', config, deps)
+            end,
+            get_handlers = function()
+                return handlers
+            end,
+            get_data_file = function()
+                return data_file
+            end,
+        })
+    end, debug.traceback)
+
+    if data_file and vim.uv.fs_stat(data_file) then
+        vim.uv.fs_unlink(data_file)
+    end
+
+    if not ok then
+        error(err, 0)
+    end
+end
+
 local context = {
     lines_before = '',
     lines_after = '',
@@ -50,31 +77,27 @@ return {
     {
         name = 'openai FIM streaming emits complete snapshots without duplicating chunks',
         run = function()
-            helpers.setup_root_config {
-                before_cursor_filter_length = 0,
-                after_cursor_filter_length = 0,
-            }
-
-            with_mocked_job(function(get_handlers)
-                local base = helpers.reload 'harmonize.backends.openai_base'
+            with_mocked_job(function(ctx)
+                local backend = ctx.backend(true)
                 local updates = {}
                 local result
 
-                base.complete_openai_fim_base(options(true), function(json)
-                    return json.choices[1].text
-                end, context, function(items)
-                    result = items
-                end, function(text)
-                    table.insert(updates, text)
-                end)
+                backend:complete(context, {
+                    on_finish = function(items)
+                        result = items
+                    end,
+                    on_update = function(text)
+                        table.insert(updates, text)
+                    end,
+                })
 
-                local handlers = assert(get_handlers())
-                helpers.expect_truthy(handlers.on_stdout)
+                local h = assert(ctx.get_handlers())
+                helpers.expect_truthy(h.on_stdout)
 
-                handlers.on_stdout(nil, 'data: {"choices":[{"text":"foo"}]}\r')
-                handlers.on_stdout(nil, '\ndata: {"choices":[{"text":"bar"}]}\r\n')
-                handlers.on_stdout(nil, 'data: [DONE]\r\n')
-                handlers.on_exit({}, { code = 0 })
+                h.on_stdout(nil, 'data: {"choices":[{"text":"foo"}]}\r')
+                h.on_stdout(nil, '\ndata: {"choices":[{"text":"bar"}]}\r\n')
+                h.on_stdout(nil, 'data: [DONE]\r\n')
+                h.on_exit({ code = 0 }, ctx.get_data_file())
 
                 helpers.expect_equal(updates, { 'foo', 'foobar' })
                 helpers.expect_equal(result, { 'foobar' })
@@ -84,27 +107,19 @@ return {
     {
         name = 'openai FIM non-streaming leaves stdout collection to vim.system',
         run = function()
-            helpers.setup_root_config {
-                before_cursor_filter_length = 0,
-                after_cursor_filter_length = 0,
-            }
-
-            with_mocked_job(function(get_handlers)
-                local base = helpers.reload 'harmonize.backends.openai_base'
+            with_mocked_job(function(ctx)
+                local backend = ctx.backend(false)
                 local result
 
-                base.complete_openai_fim_base(options(false), function(json)
-                    return json.choices[1].text
-                end, context, function(items)
-                    result = items
-                end)
-
-                local handlers = assert(get_handlers())
-                helpers.expect_falsy(handlers.on_stdout)
-                handlers.on_exit({}, {
-                    code = 0,
-                    stdout = '{"choices":[{"text":"plain"}]}',
+                backend:complete(context, {
+                    on_finish = function(items)
+                        result = items
+                    end,
                 })
+
+                local h = assert(ctx.get_handlers())
+                helpers.expect_falsy(h.on_stdout)
+                h.on_exit({ code = 0, stdout = '{"choices":[{"text":"plain"}]}' }, ctx.get_data_file())
 
                 helpers.expect_equal(result, { 'plain' })
             end)

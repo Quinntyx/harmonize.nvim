@@ -1,13 +1,13 @@
 local helpers = require 'tests.helpers'
+local Context = require 'harmonize.context'
+local RecentEditsSource = require 'harmonize.context.source.recent_edits'
 
 local function setup_edits(bufnr)
-    helpers.setup_root_config { provider = 'llama_cpp' }
-
-    local edits = helpers.reload 'harmonize.context.recent_edits'
-    edits.reset()
+    local options = helpers.merged_config().context_sources.recent_edits
+    local edits = RecentEditsSource.new(options)
 
     local augroup = vim.api.nvim_create_augroup('harmonize-test-edits', { clear = true })
-    edits.setup(augroup)
+    edits:start(augroup)
     return edits
 end
 
@@ -21,7 +21,7 @@ return {
 
             vim.api.nvim_buf_set_lines(bufnr, 4, 4, false, { 'inserted' })
 
-            local chunks = edits.snapshot(bufnr)
+            local chunks = edits:snapshot(bufnr)
             helpers.expect_equal(#chunks, 1)
             helpers.expect_equal(chunks[1].bufnr, bufnr)
             -- The region grows to the budget in both directions.
@@ -42,8 +42,28 @@ return {
             vim.api.nvim_buf_set_lines(bufnr, 4, 4, false, { 'one' })
             vim.api.nvim_buf_set_lines(bufnr, 5, 5, false, { 'two' })
 
-            local chunks = edits.snapshot(bufnr)
+            local chunks = edits:snapshot(bufnr)
             helpers.expect_equal(#chunks, 1)
+
+            helpers.delete_buffer(bufnr)
+        end,
+    },
+    {
+        name = 'merging adjacent regions keeps the union of both ranges',
+        run = function()
+            local bufnr = helpers.create_buffer({ 'l0', 'l1', 'l2', 'l3', 'l4' })
+            vim.bo[bufnr].buftype = ''
+            local edits = setup_edits(bufnr)
+
+            -- Insert above the previous edit: a broken merger would replace
+            -- the old bounds and drop 'one'; the union must keep both.
+            vim.api.nvim_buf_set_lines(bufnr, 4, 4, false, { 'one' })
+            vim.api.nvim_buf_set_lines(bufnr, 3, 3, false, { 'zero' })
+
+            local chunks = edits:snapshot(bufnr)
+            helpers.expect_equal(#chunks, 1)
+            helpers.expect_truthy(vim.tbl_contains(chunks[1].lines, 'one'), 'the first insertion must survive')
+            helpers.expect_truthy(vim.tbl_contains(chunks[1].lines, 'zero'), 'the second insertion must grow the region')
 
             helpers.delete_buffer(bufnr)
         end,
@@ -69,7 +89,7 @@ return {
             vim.api.nvim_buf_set_lines(bufnr, 32, 32, false, { 'e4' })
             vim.api.nvim_buf_set_lines(bufnr, 42, 42, false, { 'e5' })
 
-            local chunks = edits.snapshot(bufnr)
+            local chunks = edits:snapshot(bufnr)
             helpers.expect_equal(#chunks, 4)
 
             -- The first edit must have been dropped as the oldest.
@@ -85,39 +105,43 @@ return {
     {
         name = 'context.snapshot drops chunks the cursor context already covers',
         run = function()
-            helpers.setup_root_config { provider = 'llama_cpp' }
+            local context = Context.new(helpers.merged_config { provider = 'llama_cpp' }, {})
 
             local bufnr = helpers.create_buffer({ 'local x = 1', 'local y = 2', 'local z = 3' })
             vim.bo[bufnr].buftype = ''
             vim.api.nvim_set_current_buf(bufnr)
 
-            local context = helpers.reload 'harmonize.context'
-            local edits = helpers.reload 'harmonize.context.recent_edits'
-            edits.reset()
-            local augroup = vim.api.nvim_create_augroup('harmonize-test-context', { clear = true })
-            edits.setup(augroup)
-            context.augroup = augroup
-
+            context:start()
             vim.api.nvim_buf_set_lines(bufnr, 1, 1, false, { 'local w = 2.5' })
 
             -- The edit sits inside the covered range, so nothing may be sent
             -- as extra context for this small buffer.
-            local input_extra = context.snapshot(bufnr, {
-                covered_lines = { start = 0, end_exclusive = nil },
-            })
+            local input_extra = context:snapshot_extra(bufnr, { start = 0, end_exclusive = nil })
             helpers.expect_falsy(input_extra)
 
             -- Narrowing the covered range to line 3 lets the edit region's
             -- first three lines through instead.
-            input_extra = context.snapshot(bufnr, {
-                covered_lines = { start = 3, end_exclusive = nil },
-            })
+            input_extra = context:snapshot_extra(bufnr, { start = 3, end_exclusive = nil })
             helpers.expect_truthy(input_extra)
             helpers.expect_equal(#input_extra, 1)
             helpers.expect_equal(input_extra[1].filename, '[buffer]')
             helpers.expect_truthy(input_extra[1].text:find 'local w = 2.5')
 
+            context:close()
             helpers.delete_buffer(bufnr)
+        end,
+    },
+    {
+        name = 'recent_edits reset keeps attachment ownership for later cleanup',
+        run = function()
+            local source = RecentEditsSource.new(helpers.merged_config().context_sources.recent_edits)
+            source.attached[17] = true
+            source.entries = { { bufnr = 17, extmark_id = 1 } }
+
+            source:reset()
+
+            helpers.expect_equal(source.entries, {})
+            helpers.expect_equal(source.attached, { [17] = true })
         end,
     },
 }
