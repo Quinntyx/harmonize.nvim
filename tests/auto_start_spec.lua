@@ -195,4 +195,138 @@ return {
             end
         end,
     },
+    {
+        name = 'binary resolution finds releases whose binaries live under build/bin',
+        run = function()
+            local install = helpers.reload 'harmonize.backend.llama_install'
+            local original_executable = vim.fn.executable
+            local original_glob = vim.fn.glob
+            local base = install.data_dir .. '/llama.cpp/'
+
+            local ok, err = xpcall(function()
+                vim.fn.executable = function(name)
+                    if name == 'llama' or name == 'llama-server' then
+                        return 0
+                    end
+                    return 1
+                end
+                vim.fn.glob = function(pattern)
+                    if pattern:match '/build/bin/llama%-server$' then
+                        return { base .. 'b4600/build/bin/llama-server' }
+                    end
+                    return {}
+                end
+
+                helpers.expect_equal(install.resolve_binary(), base .. 'b4600/build/bin/llama-server')
+            end, debug.traceback)
+
+            vim.fn.executable = original_executable
+            vim.fn.glob = original_glob
+            if not ok then
+                error(err, 0)
+            end
+        end,
+    },
+    {
+        name = 'download creates the extraction directory before unzip runs',
+        run = function()
+            local install = helpers.reload 'harmonize.backend.llama_install'
+            local original_system = vim.system
+            local original_executable = vim.fn.executable
+            local notifications, restore_notifications = helpers.capture_notifications()
+            local dest_dir = install.data_dir .. '/llama.cpp/b999001'
+            local finished = false
+
+            local ok, err = xpcall(function()
+                vim.fn.executable = function()
+                    return 1
+                end
+                vim.system = function(cmd, opts, on_exit)
+                    if cmd[1] == 'curl' then
+                        on_exit { code = 0, stderr = '' }
+                        return
+                    end
+
+                    local unzip_dest
+                    for i, arg in ipairs(cmd) do
+                        if arg == '-d' then
+                            unzip_dest = cmd[i + 1]
+                        end
+                    end
+                    helpers.expect_equal(unzip_dest, dest_dir, 'unzip must extract into the version directory')
+                    helpers.expect_equal(
+                        vim.fn.isdirectory(unzip_dest),
+                        1,
+                        'the extraction directory must exist before unzip runs'
+                    )
+                    on_exit { code = 0, stderr = '' }
+                end
+
+                install.download_binary('b999001', function()
+                    finished = true
+                end)
+                helpers.wait_until(function()
+                    return finished
+                end, 2000, 'the continuation must run after unzip succeeds')
+            end, debug.traceback)
+
+            vim.system = original_system
+            vim.fn.executable = original_executable
+            restore_notifications()
+            vim.fn.delete(dest_dir, 'rf')
+
+            if not ok then
+                error(err, 0)
+            end
+        end,
+    },
+    {
+        name = 'an unzip failure reports the exit code and stderr',
+        run = function()
+            local install = helpers.reload 'harmonize.backend.llama_install'
+            local original_system = vim.system
+            local original_executable = vim.fn.executable
+            local notifications, restore_notifications = helpers.capture_notifications()
+            local dest_dir = install.data_dir .. '/llama.cpp/b999002'
+            local finished = false
+
+            local ok, err = xpcall(function()
+                vim.fn.executable = function()
+                    return 1
+                end
+                vim.system = function(cmd, opts, on_exit)
+                    if cmd[1] == 'curl' then
+                        on_exit { code = 0, stderr = '' }
+                    else
+                        on_exit { code = 2, stderr = 'checkdir: cannot create extraction directory\n' }
+                    end
+                end
+
+                install.download_binary('b999002', function()
+                    finished = true
+                end)
+                helpers.wait_until(function()
+                    return #notifications >= 2
+                end, 2000, 'the unzip failure must be reported')
+
+                local failure = notifications[#notifications]
+                helpers.expect_match(failure.msg, 'exit 2', 'the unzip exit code must be reported')
+                helpers.expect_match(
+                    failure.msg,
+                    'cannot create extraction directory',
+                    'the unzip stderr must be reported'
+                )
+                helpers.expect_falsy(finished, 'the continuation must not run when unzip fails')
+            end, debug.traceback)
+
+            vim.system = original_system
+            vim.fn.executable = original_executable
+            restore_notifications()
+            vim.fn.delete(dest_dir, 'rf')
+
+            if not ok then
+                error(err, 0)
+            end
+        end,
+    },
 }

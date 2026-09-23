@@ -124,6 +124,10 @@
 
 ## Fixes
 
+- `auto_start` downloads llama.cpp on a fresh machine again: the extraction
+  directory is created before unpacking, an unpack failure reports the exit
+  code and stderr, and releases whose binaries live under `build/bin/` are
+  found instead of being downloaded again on every start.
 - Changing the model with `change_model` no longer changes the configuration
   defaults for the rest of the session: the next `setup()` still starts from
   the documented defaults.

@@ -13,6 +13,16 @@ M.fallback_release = 'b4600'
 
 M.data_dir = data_dir
 
+-- Where the binaries sit inside an extracted release zip, relative to the
+-- extraction directory. The layout differs between releases: the pinned
+-- b4600 zip nests them under build/bin/.
+local binary_relpaths = {
+    '/bin/llama',
+    '/bin/llama-server',
+    '/build/bin/llama',
+    '/build/bin/llama-server',
+}
+
 --- Whether curl is available for downloads and health checks.
 function M.has_curl()
     return vim.fn.executable 'curl' == 1
@@ -27,9 +37,9 @@ function M.resolve_binary()
         end
     end
 
-    for _, rel in ipairs { '/llama.cpp/*/bin/llama', '/llama.cpp/*/bin/llama-server' } do
+    for _, rel in ipairs(binary_relpaths) do
         local best, best_build
-        for _, candidate in ipairs(vim.fn.glob(data_dir .. rel, false, true)) do
+        for _, candidate in ipairs(vim.fn.glob(data_dir .. '/llama.cpp/*' .. rel, false, true)) do
             local build = tonumber(candidate:match('/b(%d+)/')) or -1
             if vim.fn.executable(candidate) == 1 and (not best_build or build > best_build) then
                 best = candidate
@@ -94,9 +104,11 @@ function M.download_binary(version, then_fn)
     local dest_dir = data_dir .. '/llama.cpp/' .. version
     local zip_path = vim.fn.tempname() .. '.zip'
 
-    if vim.fn.filereadable(dest_dir .. '/llama') == 1 then
-        then_fn()
-        return
+    for _, rel in ipairs(binary_relpaths) do
+        if vim.fn.filereadable(dest_dir .. rel) == 1 then
+            then_fn()
+            return
+        end
     end
 
     if vim.fn.executable 'unzip' ~= 1 then
@@ -112,6 +124,10 @@ function M.download_binary(version, then_fn)
         return
     end
 
+    -- unzip creates the final component of -d only when its parent exists,
+    -- and a fresh data directory has no llama.cpp/ yet.
+    vim.fn.mkdir(dest_dir, 'p')
+
     local url = ('https://github.com/ggml-org/llama.cpp/releases/download/%s/llama-%s-bin-ubuntu-x64.zip')
         :format(version, version)
 
@@ -121,13 +137,22 @@ function M.download_binary(version, then_fn)
     vim.system({ 'curl', '-fL', '--retry', '2', '-o', zip_path, url }, nil, vim.schedule_wrap(function(out)
         if out.code ~= 0 then
             vim.uv.fs_unlink(zip_path)
-            vim.notify('llama.cpp download failed (' .. out.code .. ')', vim.log.levels.ERROR)
+            vim.notify(
+                ('llama.cpp download failed (exit %d): %s'):format(out.code, vim.trim(out.stderr or '')),
+                vim.log.levels.ERROR
+            )
             return
         end
         vim.system({ 'unzip', '-q', '-o', zip_path, '-d', dest_dir }, nil, vim.schedule_wrap(function(unzip_out)
             vim.uv.fs_unlink(zip_path)
             if unzip_out.code ~= 0 then
-                vim.notify('llama.cpp download failed to unzip', vim.log.levels.ERROR)
+                vim.notify(
+                    ('llama.cpp download failed to unzip (exit %d): %s'):format(
+                        unzip_out.code,
+                        vim.trim(unzip_out.stderr or '')
+                    ),
+                    vim.log.levels.ERROR
+                )
                 return
             end
             vim.notify('llama.cpp ' .. version .. ' installed in ' .. dest_dir, vim.log.levels.INFO)
