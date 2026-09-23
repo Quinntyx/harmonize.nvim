@@ -41,9 +41,30 @@ function ManagedServer:healthy()
 end
 
 function ManagedServer:spawn(cmd)
-    local handle_ok, handle = pcall(vim.system, cmd, { detach = true }, vim.schedule_wrap(function(out)
+    -- The downloaded release ships its shared libraries next to the binary,
+    -- but the binary's runpath does not point at its own directory, so the
+    -- loader needs LD_LIBRARY_PATH to find them.
+    local opts = { detach = true }
+    local bin_dir = vim.fn.fnamemodify(vim.fn.exepath(cmd[1]), ':h')
+    if vim.uv.fs_stat(bin_dir .. '/libllama.so') then
+        local inherited = vim.env.LD_LIBRARY_PATH
+        opts.env = { LD_LIBRARY_PATH = bin_dir .. (inherited and inherited ~= '' and ':' .. inherited or '') }
+    end
+
+    local handle_ok, handle = pcall(vim.system, cmd, opts, vim.schedule_wrap(function(out)
         if out.code ~= 0 and not self:healthy() then
-            vim.notify('llama server exited with code ' .. out.code, vim.log.levels.ERROR)
+            -- The last non-empty stderr line is the process's own explanation
+            -- of why it died.
+            local reason = ''
+            for line in (out.stderr or ''):gmatch '[^\n]+' do
+                if vim.trim(line) ~= '' then
+                    reason = vim.trim(line)
+                end
+            end
+            vim.notify(
+                'llama server exited with code ' .. out.code .. (reason ~= '' and ': ' .. reason or ''),
+                vim.log.levels.ERROR
+            )
         end
     end))
     if not handle_ok then

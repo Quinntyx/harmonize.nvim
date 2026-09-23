@@ -128,6 +128,9 @@
   directory is created before unpacking, an unpack failure reports the exit
   code and stderr, and releases whose binaries live under `build/bin/` are
   found instead of being downloaded again on every start.
+- An auto-started llama.cpp server from a downloaded release finds the shared
+  libraries shipped next to the binary instead of exiting with code 127, and
+  the exit message includes the process's last stderr line.
 - Changing the model with `change_model` no longer changes the configuration
   defaults for the rest of the session: the next `setup()` still starts from
   the documented defaults.

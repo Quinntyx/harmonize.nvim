@@ -329,4 +329,120 @@ return {
             end
         end,
     },
+    {
+        name = 'spawn points the loader at the libraries shipped beside the binary',
+        run = function()
+            local server = require 'harmonize.backend.llama_server'
+            local original_system = vim.system
+            local notifications, restore_notifications = helpers.capture_notifications()
+            local bin_dir = vim.fn.tempname()
+            local captured
+
+            local ok, err = xpcall(function()
+                vim.fn.mkdir(bin_dir, 'p')
+                local binary = bin_dir .. '/llama-server'
+                vim.fn.writefile({ '#!/bin/sh' }, binary)
+                vim.fn.setfperm(binary, 'rwxr-xr-x')
+                vim.fn.writefile({ '' }, bin_dir .. '/libllama.so')
+
+                vim.system = function(cmd, opts, on_exit)
+                    captured = { cmd = cmd, opts = opts, on_exit = on_exit }
+                end
+
+                server.new({ host = '127.0.0.1', port = 8012, kill_on_exit = false }, {}):spawn { binary }
+
+                helpers.expect_equal(captured.opts.detach, true, 'the server must keep running detached')
+                helpers.expect_falsy(captured.opts.env == nil, 'the loader environment must be set')
+                helpers.expect_equal(
+                    captured.opts.env.LD_LIBRARY_PATH:sub(1, #bin_dir),
+                    bin_dir,
+                    'LD_LIBRARY_PATH must lead with the binary directory'
+                )
+            end, debug.traceback)
+
+            vim.system = original_system
+            restore_notifications()
+            vim.fn.delete(bin_dir, 'rf')
+
+            if not ok then
+                error(err, 0)
+            end
+        end,
+    },
+    {
+        name = 'spawn leaves the environment alone for a binary without bundled libraries',
+        run = function()
+            local server = require 'harmonize.backend.llama_server'
+            local original_system = vim.system
+            local notifications, restore_notifications = helpers.capture_notifications()
+            local bin_dir = vim.fn.tempname()
+            local captured
+
+            local ok, err = xpcall(function()
+                vim.fn.mkdir(bin_dir, 'p')
+                local binary = bin_dir .. '/llama'
+                vim.fn.writefile({ '#!/bin/sh' }, binary)
+                vim.fn.setfperm(binary, 'rwxr-xr-x')
+
+                vim.system = function(cmd, opts, on_exit)
+                    captured = { cmd = cmd, opts = opts, on_exit = on_exit }
+                end
+
+                server.new({ host = '127.0.0.1', port = 8012, kill_on_exit = false }, {}):spawn { binary }
+
+                helpers.expect_falsy(
+                    captured.opts.env,
+                    'a binary with no libraries beside it needs no loader environment'
+                )
+            end, debug.traceback)
+
+            vim.system = original_system
+            restore_notifications()
+            vim.fn.delete(bin_dir, 'rf')
+
+            if not ok then
+                error(err, 0)
+            end
+        end,
+    },
+    {
+        name = 'a server exit reports the last stderr line as the reason',
+        run = function()
+            local server = require 'harmonize.backend.llama_server'
+            local original_system = vim.system
+            local notifications, restore_notifications = helpers.capture_notifications()
+            local captured
+
+            local ok, err = xpcall(function()
+                vim.system = function(cmd, opts, on_exit)
+                    captured = { cmd = cmd, opts = opts, on_exit = on_exit }
+                end
+
+                local instance = server.new({ host = '127.0.0.1', port = 8012, kill_on_exit = false }, {})
+                instance.healthy = function()
+                    return false
+                end
+                instance:spawn { '/bin/true' }
+
+                captured.on_exit {
+                    code = 127,
+                    stderr = 'error while loading shared libraries: libllama.so: cannot open shared object file\n',
+                }
+                helpers.wait_until(function()
+                    return #notifications >= 2
+                end, 2000, 'the server exit must be reported')
+
+                local failure = notifications[#notifications]
+                helpers.expect_match(failure.msg, 'exited with code 127', 'the exit code must be reported')
+                helpers.expect_match(failure.msg, 'shared libraries', 'the stderr reason must be reported')
+            end, debug.traceback)
+
+            vim.system = original_system
+            restore_notifications()
+
+            if not ok then
+                error(err, 0)
+            end
+        end,
+    },
 }
