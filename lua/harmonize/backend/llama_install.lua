@@ -116,13 +116,15 @@ function M.download_binary(version, then_fn)
         :format(version, version)
 
     vim.notify('Downloading llama.cpp ' .. version .. ' (' .. url .. ')', vim.log.levels.INFO)
-    vim.system({ 'curl', '-fL', '--retry', '2', '-o', zip_path, url }, nil, function(out)
+    -- The system callbacks run in a fast event, where vim.notify errors, so
+    -- they are scheduled back onto the main loop.
+    vim.system({ 'curl', '-fL', '--retry', '2', '-o', zip_path, url }, nil, vim.schedule_wrap(function(out)
         if out.code ~= 0 then
             vim.uv.fs_unlink(zip_path)
             vim.notify('llama.cpp download failed (' .. out.code .. ')', vim.log.levels.ERROR)
             return
         end
-        vim.system({ 'unzip', '-q', '-o', zip_path, '-d', dest_dir }, nil, function(unzip_out)
+        vim.system({ 'unzip', '-q', '-o', zip_path, '-d', dest_dir }, nil, vim.schedule_wrap(function(unzip_out)
             vim.uv.fs_unlink(zip_path)
             if unzip_out.code ~= 0 then
                 vim.notify('llama.cpp download failed to unzip', vim.log.levels.ERROR)
@@ -130,8 +132,8 @@ function M.download_binary(version, then_fn)
             end
             vim.notify('llama.cpp ' .. version .. ' installed in ' .. dest_dir, vim.log.levels.INFO)
             then_fn()
-        end)
-    end)
+        end))
+    end))
 end
 
 --- Build the server command from the base command in `opts.cmd`, the model
