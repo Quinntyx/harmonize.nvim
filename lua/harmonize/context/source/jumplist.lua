@@ -60,7 +60,13 @@ end
 function JumplistSource:lines_from_buffer(bufnr, lnum)
     local options = self.options
     local line_count = api.nvim_buf_line_count(bufnr)
+    -- A jump can point past the end of a buffer that lost lines after it was
+    -- recorded.
+    lnum = math.max(1, math.min(lnum, line_count))
     local get_line = function(r)
+        if r < 0 or r >= line_count then
+            return nil
+        end
         return api.nvim_buf_get_lines(bufnr, r, r + 1, true)[1]
     end
     local start_row, end_row = expand_around(get_line, line_count, lnum, options)
@@ -80,6 +86,7 @@ function JumplistSource:lines_from_file(filename, lnum)
         return nil
     end
 
+    lnum = math.max(1, math.min(lnum, #lines))
     local get_line = function(r)
         return lines[r + 1]
     end

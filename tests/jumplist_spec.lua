@@ -79,6 +79,21 @@ return {
         end,
     },
     {
+        name = 'jumplist.lines_from_buffer stays inside the buffer for a stale location',
+        run = function()
+            local jumplist = make_source()
+            local bufnr = helpers.create_buffer({ 'l0', 'l1', 'l2' })
+
+            local start_row, end_row, lines = jumplist:lines_from_buffer(bufnr, 40)
+
+            helpers.expect_equal(start_row, 0)
+            helpers.expect_equal(end_row, 3)
+            helpers.expect_equal(lines, { 'l0', 'l1', 'l2' })
+
+            helpers.delete_buffer(bufnr)
+        end,
+    },
+    {
         name = 'jumplist.snapshot builds a chunk around the most recent jump',
         run = function()
             local jumplist = make_source()
