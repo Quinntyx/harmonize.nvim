@@ -180,9 +180,16 @@ function M.server_cmd(opts, host, port)
             return nil
         end
         words[1] = binary
-        -- The downloaded `llama` binary needs its `serve` subcommand; an
-        -- explicit `llama-server` binary does not.
-        if vim.fn.fnamemodify(binary, ':t') == 'llama' and not vim.tbl_contains(words, 'serve') then
+        -- The downloaded `llama` binary needs its `serve` subcommand, while
+        -- `llama-server` rejects one: `llama-server serve` fails with
+        -- `error: invalid argument: serve`. The default base command is
+        -- `llama serve`, so the subcommand has to be dropped when the resolved
+        -- binary is `llama-server`.
+        if vim.fn.fnamemodify(binary, ':t') == 'llama-server' then
+            if words[2] == 'serve' then
+                table.remove(words, 2)
+            end
+        elseif not vim.tbl_contains(words, 'serve') then
             table.insert(words, 2, 'serve')
         end
     end

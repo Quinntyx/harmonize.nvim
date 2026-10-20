@@ -124,6 +124,10 @@
 
 ## Fixes
 
+- An auto-started server using a downloaded `llama-server` binary no longer
+  fails with `error: invalid argument: serve`: the configured base command is
+  `llama serve`, and the `serve` subcommand is now dropped when the resolved
+  binary is `llama-server` instead of the multi-purpose `llama` CLI.
 - `auto_start` downloads llama.cpp on a fresh machine again: the extraction
   directory is created before unpacking, an unpack failure reports the exit
   code and stderr, and releases whose binaries live under `build/bin/` are

@@ -137,6 +137,63 @@ return {
         end,
     },
     {
+        name = 'a resolved binary fixes up the serve subcommand for its flavor',
+        run = function()
+            local install = helpers.reload 'harmonize.backend.llama_install'
+            local original_executable = vim.fn.executable
+            local original_resolve = install.resolve_binary
+
+            local ok, err = xpcall(function()
+                vim.fn.executable = function()
+                    return 0
+                end
+
+                -- The default base command is `llama serve`; a downloaded
+                -- llama-server binary rejects that subcommand.
+                install.resolve_binary = function()
+                    return '/data/llama.cpp/b4600/build/bin/llama-server'
+                end
+                local cmd = install.server_cmd({
+                    cmd = 'llama serve',
+                    model = 'ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF',
+                    extra_args = {},
+                }, '127.0.0.1', 8012)
+                helpers.expect_equal(cmd, {
+                    '/data/llama.cpp/b4600/build/bin/llama-server',
+                    '-hf',
+                    'ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF',
+                    '--host', '127.0.0.1',
+                    '--port', '8012',
+                })
+
+                -- A downloaded `llama` binary is the multi-purpose CLI and
+                -- does need the subcommand.
+                install.resolve_binary = function()
+                    return '/data/llama.cpp/b4600/bin/llama'
+                end
+                cmd = install.server_cmd({
+                    cmd = 'llama',
+                    model = 'ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF',
+                    extra_args = {},
+                }, '127.0.0.1', 8012)
+                helpers.expect_equal(cmd, {
+                    '/data/llama.cpp/b4600/bin/llama',
+                    'serve',
+                    '-hf',
+                    'ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF',
+                    '--host', '127.0.0.1',
+                    '--port', '8012',
+                })
+            end, debug.traceback)
+
+            install.resolve_binary = original_resolve
+            vim.fn.executable = original_executable
+            if not ok then
+                error(err, 0)
+            end
+        end,
+    },
+    {
         name = 'server command gives up when no llama.cpp binary can be resolved',
         run = function()
             local install = helpers.reload 'harmonize.backend.llama_install'
